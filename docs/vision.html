@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fotopia HR Agent — Product Vision</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e8e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex; min-height: 100vh;
+    }
+
+    /* ── Sidebar ── */
+    nav {
+      width: 220px; min-height: 100vh;
+      background: #0a0d14; border-right: 1px solid #1a1d2e;
+      padding: 24px 0; position: fixed; top: 0; left: 0; overflow-y: auto;
+    }
+    .nav-logo { padding: 0 20px 24px; border-bottom: 1px solid #1a1d2e; margin-bottom: 16px; }
+    .nav-logo h1 { font-size: 16px; font-weight: 700; color: #a5b4fc; }
+    .nav-logo p { font-size: 11px; color: #555; margin-top: 2px; }
+    nav a { display: block; padding: 8px 20px; color: #777; text-decoration: none; font-size: 12px; transition: color .15s, background .15s; }
+    nav a:hover, nav a.active { color: #a5b4fc; background: #1a1d2e; }
+    .nav-section { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #444; padding: 12px 20px 4px; font-weight: 600; }
+
+    /* ── Main ── */
+    main { margin-left: 220px; flex: 1; padding: 40px 48px; max-width: 1100px; }
+
+    .page-header { margin-bottom: 48px; padding-bottom: 24px; border-bottom: 1px solid #1a1d2e; }
+    .page-header h1 { font-size: 24px; font-weight: 700; }
+    .page-header p { color: #666; font-size: 14px; margin-top: 6px; line-height: 1.6; }
+
+    .badge { display: inline-block; padding: 2px 10px; background: #1a1d2e; border: 1px solid #2d3561; border-radius: 12px; font-size: 11px; color: #a5b4fc; margin-left: 8px; vertical-align: middle; }
+    .badge.green { border-color: #166534; color: #4ade80; background: #1e3a2f; }
+    .badge.yellow { border-color: #92400e; color: #fbbf24; background: #3d2800; }
+
+    section { margin-bottom: 64px; scroll-margin-top: 24px; }
+    section h2 { font-size: 18px; font-weight: 600; color: #e8e8f0; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+    .sn { display: inline-flex; width: 26px; height: 26px; background: #2d3561; color: #a5b4fc; border-radius: 6px; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+    section p.desc { color: #888; font-size: 13px; line-height: 1.6; margin-bottom: 20px; max-width: 700px; }
+
+    .box { background: #0d1018; border: 1px solid #1a1d2e; border-radius: 12px; padding: 32px; overflow-x: auto; }
+    .mermaid { display: flex; justify-content: center; }
+
+    /* ── Layer Stack ── */
+    .layer-stack { display: flex; flex-direction: column; gap: 4px; }
+    .layer {
+      display: flex; align-items: center; gap: 16px;
+      padding: 12px 16px; border-radius: 8px;
+      border: 1px solid #1a1d2e; background: #111420;
+      transition: background .15s;
+    }
+    .layer:hover { background: #141726; }
+    .layer-num { width: 28px; height: 28px; border-radius: 6px; background: #1a1d2e; color: #666; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+    .layer.built .layer-num { background: #1e2a5e; color: #a5b4fc; }
+    .layer.next .layer-num { background: #3d2800; color: #fbbf24; }
+    .layer.future .layer-num { background: #1a1d2e; color: #444; }
+    .layer-body { flex: 1; }
+    .layer-title { font-size: 13px; font-weight: 600; color: #e8e8f0; margin-bottom: 2px; }
+    .layer.future .layer-title { color: #666; }
+    .layer-desc { font-size: 12px; color: #666; }
+    .layer-tech { font-size: 11px; color: #444; font-family: monospace; margin-top: 2px; }
+    .layer-status { flex-shrink: 0; }
+    .sb { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; letter-spacing: .03em; }
+    .sb-built  { background: #1e3a2f; color: #4ade80; border: 1px solid #166534; }
+    .sb-next   { background: #3d2800; color: #fbbf24; border: 1px solid #92400e; }
+    .sb-p2     { background: #1a1d2e; color: #555; border: 1px solid #252b42; }
+    .sb-p3     { background: #1a1d2e; color: #555; border: 1px solid #252b42; }
+    .sb-p4     { background: #1a1d2e; color: #555; border: 1px solid #252b42; }
+    .layer-connector { width: 2px; height: 8px; background: #1a1d2e; margin-left: 22px; }
+
+    /* ── Security rings ── */
+    .rings {
+      position: relative; display: flex; align-items: center;
+      justify-content: center; padding: 40px 0; min-height: 420px;
+    }
+    .ring {
+      position: absolute; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px solid;
+    }
+    .ring-1 { width: 380px; height: 380px; border-color: #4f5fa8; background: rgba(45,53,97,0.08); }
+    .ring-2 { width: 290px; height: 290px; border-color: #6d28d9; background: rgba(59,30,94,0.1); }
+    .ring-3 { width: 210px; height: 210px; border-color: #166534; background: rgba(30,58,47,0.12); }
+    .ring-4 { width: 130px; height: 130px; border-color: #92400e; background: rgba(93,61,30,0.15); border-radius: 12px; }
+    .ring-label {
+      position: absolute; background: #0d1018; border: 1px solid;
+      border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600;
+      white-space: nowrap; text-align: center;
+    }
+    .ring-label.l1 { border-color: #4f5fa8; color: #a5b4fc; top: 8px; left: 50%; transform: translateX(-50%); }
+    .ring-label.l2 { border-color: #6d28d9; color: #c4b5fd; top: 62px; left: 50%; transform: translateX(-50%); }
+    .ring-label.l3 { border-color: #166534; color: #4ade80; top: 116px; left: 50%; transform: translateX(-50%); }
+    .ring-label.l4 { border-color: #92400e; color: #fbbf24; top: 164px; left: 50%; transform: translateX(-50%); }
+    .ring-core { color: #e8e8f0; font-size: 12px; font-weight: 700; text-align: center; line-height: 1.4; }
+
+    .ring-sublabels { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+    .ring-sublabel { flex: 1; min-width: 160px; padding: 10px 14px; border-radius: 8px; background: #111420; border: 1px solid #1a1d2e; }
+    .ring-sublabel h4 { font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+    .ring-sublabel p { font-size: 11px; color: #666; line-height: 1.4; }
+    .future-ring { border-color: #555; color: #555; }
+
+    /* ── Roadmap Timeline ── */
+    .timeline { position: relative; padding: 24px 0 24px 32px; }
+    .timeline::before { content: ''; position: absolute; left: 12px; top: 0; bottom: 0; width: 2px; background: #1a1d2e; }
+    .phase-item { position: relative; margin-bottom: 28px; padding-left: 24px; }
+    .phase-item::before {
+      content: ''; position: absolute; left: -26px; top: 6px;
+      width: 12px; height: 12px; border-radius: 50%;
+      border: 2px solid #2d3561; background: #0f1117;
+    }
+    .phase-item.done::before { background: #4ade80; border-color: #166534; }
+    .phase-item.next::before { background: #fbbf24; border-color: #92400e; box-shadow: 0 0 8px rgba(251,191,36,.4); }
+    .phase-item.planned::before { background: #1a1d2e; border-color: #252b42; }
+    .phase-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .phase-name { font-size: 14px; font-weight: 600; }
+    .phase-done  { color: #4ade80; }
+    .phase-next  { color: #fbbf24; }
+    .phase-plan  { color: #555; }
+    .phase-items-list { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+    .phase-items-list li {
+      padding: 3px 10px; border-radius: 12px; font-size: 11px;
+      background: #111420; border: 1px solid #1a1d2e; color: #888;
+    }
+    .phase-item.done .phase-items-list li { border-color: #1e3a2f; color: #4ade80; background: #0d1a12; }
+    .phase-item.next .phase-items-list li { border-color: #3d2800; color: #fbbf24; background: #1a1200; }
+    .phase-unlocks { font-size: 11px; color: #4f5fa8; margin-top: 6px; font-style: italic; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">
+    <h1>Fotopia HR Agent</h1>
+    <p>Product Vision</p>
+  </div>
+  <div class="nav-section">Architecture</div>
+  <a href="#layers">1. 9-Layer Stack</a>
+  <a href="#marketplace">2. Agent Marketplace</a>
+  <div class="nav-section">Security</div>
+  <a href="#security">3. Defence in Depth</a>
+  <div class="nav-section">Roadmap</div>
+  <a href="#roadmap">4. Phased Roadmap</a>
+  <div class="nav-section">Traceability</div>
+  <a href="#dataflow">5. Request to Compliance</a>
+</nav>
+
+<main>
+  <div class="page-header">
+    <h1>Fotopia HR Agent <span class="badge green">Phase 1 Complete</span></h1>
+    <p>Strategic architecture and product vision for Dr. Ahmed El-Yazbi and Raef Eid.<br>
+    Enterprise SaaS AI agent platform for HR automation across Egypt/MENA — built for banks, government bodies, and healthcare organisations.</p>
+  </div>
+
+  <!-- ─────────────────── 1. 9-Layer Stack ─────────────────── -->
+  <section id="layers">
+    <h2><span class="sn">1</span> The 9-Layer Architecture</h2>
+    <p class="desc">Every layer is designed so future phases ADD to it — nothing needs to be rewritten. Layers 1–6 and 9 exist today. Layers 7–8 and the parallel workflow layer are designed and sequenced but not yet built.</p>
+    <div class="box">
+      <div class="layer-stack">
+
+        <div class="layer built">
+          <div class="layer-num">1</div>
+          <div class="layer-body">
+            <div class="layer-title">Presentation</div>
+            <div class="layer-desc">React chat interface — dark theme, markdown rendering, document download cards, suggestion chips</div>
+            <div class="layer-tech">frontend/src/ · Vite · ReactMarkdown</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer built">
+          <div class="layer-num">2</div>
+          <div class="layer-body">
+            <div class="layer-title">API / Identity Layer</div>
+            <div class="layer-desc">FastAPI. Today: stubbed ToolContext (hr_manager hardcoded). Phase 2: one function swap replaces this with JWT — nothing else changes.</div>
+            <div class="layer-tech">backend/api/main.py · ToolContext · session store</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer built">
+          <div class="layer-num">3</div>
+          <div class="layer-body">
+            <div class="layer-title">Orchestrator Layer</div>
+            <div class="layer-desc">Raw Anthropic SDK ReAct loop (MAX_ITERS=10) with server-side session history. Phase 2/3: LangGraph runs alongside for multi-day onboarding workflows — both call the same ToolRegistry.</div>
+            <div class="layer-tech">backend/agent/orchestrator.py · _sessions dict (→ Redis Phase 2)</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer built">
+          <div class="layer-num">4</div>
+          <div class="layer-body">
+            <div class="layer-title">Tool Gateway <span style="font-size:10px;color:#a5b4fc;font-weight:400">— the security boundary</span></div>
+            <div class="layer-desc">"Policy before prompt" — filters tool specs by role before the LLM call. Re-checks role at execute(). Audits every call regardless of outcome.</div>
+            <div class="layer-tech">backend/tools/registry.py · ToolRegistry</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer built">
+          <div class="layer-num">5</div>
+          <div class="layer-body">
+            <div class="layer-title">Tools (10 live)</div>
+            <div class="layer-desc">Read: employee data, leave balance, summaries, document history. Generate: salary cert, TWIMC, experience cert. Calculate: end-of-service gratuity (pure Python — LLM never does math). Future: write tools (HITL-gated), onboarding, communication.</div>
+            <div class="layer-tech">backend/tools/employee.py · documents.py · registry.py</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer built">
+          <div class="layer-num">6</div>
+          <div class="layer-body">
+            <div class="layer-title">Data Layer — PostgreSQL</div>
+            <div class="layer-desc">tenant_id on every table and every query. DataSource abstraction (PostgreSQL today, Odoo later — same interface). Phase 1.5: RLS with FORCE added as second enforcement layer.</div>
+            <div class="layer-tech">backend/data/mock.py (→ PostgreSQLDataSource) · psycopg2</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer future">
+          <div class="layer-num">7</div>
+          <div class="layer-body">
+            <div class="layer-title">Knowledge / RAG Layer</div>
+            <div class="layer-desc">pgvector co-located with relational DB. Every chunk carries tenant_id + allowed_roles. Metadata filter applied BEFORE semantic search — never after (EchoLeak/Copilot lesson).</div>
+            <div class="layer-tech">pgvector · Tier 1/2/3 document classification</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-p3">PHASE 3</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer built">
+          <div class="layer-num">8</div>
+          <div class="layer-body">
+            <div class="layer-title">LLM Layer</div>
+            <div class="layer-desc">Claude (Anthropic SDK) only. Stateless per-request — context built only from already-authorized data. Swappable to self-hosted Llama/Qwen via one env var (regulated/on-prem clients). ZDR agreement required before real client data flows through.</div>
+            <div class="layer-tech">backend/llm/claude.py · LLMProvider abstraction · Grok fallback</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+        <div class="layer-connector"></div>
+
+        <div class="layer built">
+          <div class="layer-num">9</div>
+          <div class="layer-body">
+            <div class="layer-title">Audit Layer</div>
+            <div class="layer-desc">Every tool call logged: actor, role, tool name, input, outcome, latency. Written by the registry — never bypassed. Phase 3: hash-chain rows + WORM mirror for tamper-evidence and compliance.</div>
+            <div class="layer-tech">backend/audit/logger.py · audit_log table</div>
+          </div>
+          <div class="layer-status"><span class="sb sb-built">BUILT</span></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────── 2. Agent Marketplace ─────────────────── -->
+  <section id="marketplace">
+    <h2><span class="sn">2</span> Product Vision — The Agent Marketplace</h2>
+    <p class="desc">The end-state product is a multi-tenant SaaS platform where any organisation subscribes to a sidebar of department agents. Each agent operates in complete data isolation from every other tenant. HR is live now; Finance, Legal, and Admin follow in Phase 2.</p>
+    <div class="box">
+      <div class="mermaid">
+flowchart TD
+    subgraph PLAT["Fotopia Agent Platform — Shared Infrastructure"]
+        GW["API Gateway\nJWT → ToolContext\nPhase 2"]
+        REG["ToolRegistry\nOne security model\nfor all agents"]
+        DB[("PostgreSQL\nAll tenants\ntenant_id isolated")]
+        AUD[("audit_log\nAll actions\nall tenants")]
+    end
+
+    subgraph T1["Fotopia Technologies  (Pilot Client — LIVE)"]
+        HR1["HR Agent\nLIVE NOW"]
+        FIN1["Finance Agent\nPhase 2"]
+        LEG1["Legal Agent\nPhase 2"]
+        ADM1["Admin Agent\nPhase 2"]
+    end
+
+    subgraph T2["National Bank  (Phase 2 Target)"]
+        HR2["HR Agent"]
+        FIN2["Finance Agent"]
+    end
+
+    subgraph T3["Hospital Group  (Phase 2 Target)"]
+        HR3["HR Agent"]
+    end
+
+    HR1 & FIN1 & LEG1 & ADM1 --> GW
+    HR2 & FIN2 --> GW
+    HR3 --> GW
+    GW --> REG
+    REG -->|"WHERE tenant_id = x"| DB
+    REG --> AUD
+
+    style HR1 fill:#1e3a2f,stroke:#166534,color:#4ade80
+    style T1 fill:#0d1118,stroke:#1e3a2f
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────── 3. Security ─────────────────── -->
+  <section id="security">
+    <h2><span class="sn">3</span> Security Model — Defence in Depth</h2>
+    <p class="desc">Four independent enforcement layers surround every piece of data. A failure in any single layer does not compromise the system — the other three still hold. Three more layers are added in Phase 2 and 3.</p>
+    <div class="box">
+      <div class="mermaid">
+flowchart TD
+    REQ(["Request arrives"]) --> L1
+
+    subgraph L1["LAYER 1 — Policy Before Prompt  (built)"]
+        T1["get_specs_for_role\nLLM only receives tool specs for its role\nIt cannot call — or even attempt — what it cannot see"]
+    end
+    L1 --> L2
+
+    subgraph L2["LAYER 2 — Execute Authorization  (built)"]
+        T2["registry.execute — second role check\nIndependent of the LLM call\nBlocks disallowed tools before any code runs"]
+    end
+    L2 --> L3
+
+    subgraph L3["LAYER 3 — Tenant Row Isolation  (built)"]
+        T3["WHERE tenant_id = x on every SQL query\nOther tenants data unreachable at the DB level\nNo application code path can skip this"]
+    end
+    L3 --> L4
+
+    subgraph L4["LAYER 4 — Immutable Audit Trail  (built)"]
+        T4["INSERT audit_log on every execution\nActor, role, tool, input, outcome, latency — always\nHash-chain + WORM mirror added Phase 3"]
+    end
+    L4 --> DATA[("Protected Data")]
+
+    subgraph FUTURE["Phase 2-3 additions — defence in depth continues"]
+        F1["RLS FORCE\nDatabase enforces tenant isolation\neven if app code has a bug  (Phase 1.5)"]
+        F2["Field encryption\nSalary, national_id encrypted at rest\nBlind index pattern  (Phase 3)"]
+        F3["Hash-chained audit\nTamper-evident row chain\nWORM mirror for compliance  (Phase 3)"]
+    end
+
+    style L1 fill:#1e2a5e,stroke:#1e40af
+    style L2 fill:#3b1e5e,stroke:#6d28d9
+    style L3 fill:#1e3a2f,stroke:#166534
+    style L4 fill:#5e3d1e,stroke:#92400e
+    style FUTURE fill:#111420,stroke:#252b42
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────── 4. Roadmap ─────────────────── -->
+  <section id="roadmap">
+    <h2><span class="sn">4</span> Phased Roadmap</h2>
+    <p class="desc">Each phase is a prerequisite for the next. Auth before writes. RLS before RAG. The architecture is already designed for all phases — they add to it, they don't change it.</p>
+    <div class="box">
+      <div class="timeline">
+
+        <div class="phase-item done">
+          <div class="phase-header">
+            <span class="phase-name phase-done">Phase 0</span>
+            <span class="sb sb-built">DONE</span>
+          </div>
+          <ul class="phase-items-list">
+            <li>Docker + PostgreSQL</li>
+            <li>FastAPI skeleton</li>
+            <li>LLMProvider abstraction</li>
+            <li>ToolRegistry gateway</li>
+            <li>ToolContext</li>
+            <li>audit_log table</li>
+          </ul>
+          <div class="phase-unlocks">Unlocked: secure tool execution with a single security model</div>
+        </div>
+
+        <div class="phase-item done">
+          <div class="phase-header">
+            <span class="phase-name phase-done">Phase 1</span>
+            <span class="sb sb-built">DONE</span>
+          </div>
+          <ul class="phase-items-list">
+            <li>10 tools live</li>
+            <li>Salary cert · TWIMC · Experience cert</li>
+            <li>Leave balance · Employee summary</li>
+            <li>Search + list employees</li>
+            <li>End-of-service calculation</li>
+            <li>Session history</li>
+            <li>Markdown rendering</li>
+            <li>Claude + Grok swappable</li>
+          </ul>
+          <div class="phase-unlocks">Unlocked: full demo — Nourhan can use it today</div>
+        </div>
+
+        <div class="phase-item next">
+          <div class="phase-header">
+            <span class="phase-name phase-next">Phase 1.5</span>
+            <span class="sb sb-next">NEXT</span>
+          </div>
+          <ul class="phase-items-list">
+            <li>CI test: RLS enabled on every tenant table</li>
+            <li>Cross-tenant query test → expects 0 rows</li>
+            <li>Rename MockDataSource</li>
+            <li>Redis for session history</li>
+          </ul>
+          <div class="phase-unlocks">Unlocks: safe to add more tools and real client data</div>
+        </div>
+
+        <div class="phase-item planned">
+          <div class="phase-header">
+            <span class="phase-name phase-plan">Phase 2</span>
+            <span class="sb sb-p2">PLANNED</span>
+          </div>
+          <ul class="phase-items-list">
+            <li>JWT authentication</li>
+            <li>RLS with FORCE</li>
+            <li>ZDR agreement (Anthropic)</li>
+            <li>Onboarding doc tools</li>
+            <li>Finance + Legal + Admin agents</li>
+            <li>Multi-tenant onboarding</li>
+          </ul>
+          <div class="phase-unlocks">Unlocks: real client data · privileged write tools · second tenant</div>
+        </div>
+
+        <div class="phase-item planned">
+          <div class="phase-header">
+            <span class="phase-name phase-plan">Phase 3</span>
+            <span class="sb sb-p3">PLANNED</span>
+          </div>
+          <ul class="phase-items-list">
+            <li>LangGraph onboarding state machine</li>
+            <li>Human-in-the-loop approval queue</li>
+            <li>RAG / pgvector knowledge layer</li>
+            <li>Audit hash-chain + WORM</li>
+            <li>Field-level encryption</li>
+          </ul>
+          <div class="phase-unlocks">Unlocks: multi-day workflows · document Q&A · compliance audit trail</div>
+        </div>
+
+        <div class="phase-item planned">
+          <div class="phase-header">
+            <span class="phase-name phase-plan">Phase 4</span>
+            <span class="sb sb-p4">PLANNED</span>
+          </div>
+          <ul class="phase-items-list">
+            <li>Proactive "Jarvis" briefings</li>
+            <li>Offline prompt optimisation (DSPy)</li>
+            <li>Database-per-tenant (banking/gov)</li>
+            <li>DigitizeMe integration</li>
+          </ul>
+          <div class="phase-unlocks">Unlocks: premium enterprise tier · on-prem / regulated clients</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────── 5. Data Flow ─────────────────── -->
+  <section id="dataflow">
+    <h2><span class="sn">5</span> From Request to Compliance</h2>
+    <p class="desc">Every action — even a simple "generate salary cert" — produces four traceable outputs: the document, two audit log entries, a session history update, and a document record. Nothing happens that isn't logged.</p>
+    <div class="box">
+      <div class="mermaid">
+flowchart TD
+    REQ(["Nourhan types:\nGenerate salary cert for Omar"]) --> ORCH
+
+    ORCH["Orchestrator\nReAct Loop"] --> LLM1["Claude LLM\nIteration 1"]
+    LLM1 -->|"tool_use: search_employees\nname=Omar"| REG1["ToolRegistry\nRole check PASS"]
+    REG1 -->|"SELECT WHERE\ntenant_id = fotopia"| DB[("PostgreSQL")]
+    DB -->|"EMP003 Omar Alsayed"| REG1
+    REG1 -->|"AUDIT LOG 1\nsearch_employees SUCCESS\nlatency: 12ms"| AUDIT[("audit_log")]
+    REG1 --> ORCH
+
+    ORCH --> LLM2["Claude LLM\nIteration 2"]
+    LLM2 -->|"tool_use: generate_salary_cert\nemployee_code=EMP003"| REG2["ToolRegistry\nRole check PASS\nhr_manager only"]
+    REG2 --> PDF["fpdf PDF Builder\nDB-driven slot filling\nLLM never touches content"]
+    PDF --> FILE["SC-uuid.pdf\nbackend/documents/"]
+    REG2 -->|"AUDIT LOG 2\ngenerate_salary_cert SUCCESS\ndoc_id: SC-uuid"| AUDIT
+    REG2 --> ORCH
+
+    ORCH --> SESS["_sessions\nFull raw message history\nfor next turn"]
+    ORCH --> RESP(["Response to browser:\ntext + document card\n+ session_id"])
+
+    style REQ fill:#1a1d2e,stroke:#2d3561,color:#e8e8f0
+    style RESP fill:#1e3a2f,stroke:#166534,color:#4ade80
+    style AUDIT fill:#5e3d1e,stroke:#92400e,color:#fbbf24
+    style FILE fill:#1e2a5e,stroke:#1e40af,color:#a5b4fc
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      background: '#0d1018',
+      primaryColor: '#1a1d2e',
+      primaryTextColor: '#e8e8f0',
+      primaryBorderColor: '#2d3561',
+      lineColor: '#4f5fa8',
+      secondaryColor: '#0f1117',
+      tertiaryColor: '#111420',
+      actorBkg: '#1a1d2e', actorBorder: '#2d3561',
+      actorTextColor: '#e8e8f0', actorLineColor: '#4f5fa8',
+      signalColor: '#a5b4fc', signalTextColor: '#e8e8f0',
+      fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif',
+    },
+    flowchart: { curve: 'basis', padding: 20 },
+  });
+
+  const sections = document.querySelectorAll('section[id]');
+  const links = document.querySelectorAll('nav a');
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { threshold: 0.25 });
+  sections.forEach(s => io.observe(s));
+</script>
+</body>
+</html>

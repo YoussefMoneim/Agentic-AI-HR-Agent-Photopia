@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+      font-size: 11pt;
+      color: #1a1a2e;
+      background: #fff;
+    }
+
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 18mm 20mm 18mm 20mm;
+      position: relative;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 12px;
+      border-bottom: 3px solid #1a1a2e;
+      margin-bottom: 24px;
+    }
+    .company-block { display: flex; flex-direction: column; gap: 2px; }
+    .company-name { font-size: 18pt; font-weight: 700; color: #1a1a2e; letter-spacing: -0.3px; }
+    .company-arabic {
+      font-family: 'Noto Sans Arabic', 'Arial', sans-serif;
+      font-size: 13pt;
+      color: #444;
+      direction: rtl;
+    }
+    .company-meta { font-size: 8.5pt; color: #666; margin-top: 4px; line-height: 1.5; }
+    .doc-ref { text-align: right; font-size: 8.5pt; color: #666; line-height: 1.8; }
+    .doc-ref strong { font-size: 9pt; color: #1a1a2e; }
+
+    /* ── Title ── */
+    .title-block {
+      text-align: center;
+      margin: 20px 0 24px;
+    }
+    .title-en {
+      font-size: 15pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #1a1a2e;
+    }
+    .title-underline {
+      width: 60px;
+      height: 3px;
+      background: #1a1a2e;
+      margin: 6px auto 8px;
+      border-radius: 2px;
+    }
+    .title-ar {
+      font-family: 'Noto Sans Arabic', 'Arial', sans-serif;
+      font-size: 12pt;
+      color: #444;
+      direction: rtl;
+    }
+
+    /* ── Body text ── */
+    .to-whom {
+      margin-bottom: 16px;
+      line-height: 1.7;
+      font-size: 10.5pt;
+    }
+    .to-whom .highlight { font-weight: 600; }
+    .arabic-name {
+      font-family: 'Noto Sans Arabic', 'Arial', sans-serif;
+      direction: rtl;
+      display: inline;
+    }
+
+    /* ── Details table ── */
+    .details-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 10pt;
+    }
+    .details-table th {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 9px 14px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 9.5pt;
+    }
+    .details-table td {
+      padding: 8px 14px;
+      border-bottom: 1px solid #e8e8e8;
+      vertical-align: middle;
+    }
+    .details-table tr:nth-child(even) td { background: #f8f8fb; }
+    .details-table td.label { color: #555; width: 40%; }
+    .details-table td.value { font-weight: 500; color: #1a1a2e; }
+
+    /* ── Salary section ── */
+    .salary-header {
+      background: #2d3561 !important;
+    }
+    .salary-total td {
+      background: #eef0ff !important;
+      font-weight: 700 !important;
+      font-size: 11pt !important;
+      color: #1a1a2e !important;
+    }
+
+    /* ── Closing ── */
+    .closing {
+      margin-top: 16px;
+      line-height: 1.7;
+      font-size: 10.5pt;
+    }
+
+    /* ── Signature ── */
+    .signature-block {
+      margin-top: 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .sig-left { font-size: 9pt; color: #666; }
+    .sig-right {
+      text-align: center;
+      min-width: 180px;
+    }
+    .sig-line {
+      border-top: 1.5px solid #1a1a2e;
+      margin-bottom: 6px;
+    }
+    .sig-name { font-weight: 600; font-size: 10pt; }
+    .sig-title { font-size: 8.5pt; color: #555; }
+    .sig-company { font-size: 8.5pt; color: #555; }
+
+    /* ── Footer ── */
+    .footer {
+      position: absolute;
+      bottom: 14mm;
+      left: 20mm;
+      right: 20mm;
+      border-top: 1px solid #ddd;
+      padding-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 7.5pt;
+      color: #999;
+    }
+
+    /* ── Confidential watermark ── */
+    .confidential {
+      font-size: 7.5pt;
+      color: #bbb;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="company-block">
+      <div class="company-name">{{ company_name }}</div>
+      <div class="company-arabic">{{ company_arabic_name }}</div>
+      <div class="company-meta">
+        {{ address }}<br>
+        {{ phone }} · {{ website }}
+      </div>
+    </div>
+    <div class="doc-ref">
+      <strong>REF:</strong> SC-{{ ref_number }}<br>
+      <strong>DATE:</strong> {{ issue_date }}<br>
+      <strong>TYPE:</strong> Salary Certificate
+    </div>
+  </div>
+
+  <!-- Title -->
+  <div class="title-block">
+    <div class="title-en">Salary Certificate</div>
+    <div class="title-underline"></div>
+    <div class="title-ar">شهادة راتب</div>
+  </div>
+
+  <!-- To Whom -->
+  <div class="to-whom">
+    To Whom It May Concern,<br><br>
+    This is to certify that <span class="highlight">{{ employee.full_name }}</span>
+    {% if employee.arabic_name %}(<span class="arabic-name">{{ employee.arabic_name }}</span>){% endif %}
+    is currently employed at <span class="highlight">{{ company_name }}</span>
+    in the position of <span class="highlight">{{ employee.position }}</span>
+    within the <span class="highlight">{{ employee.department }}</span> department,
+    effective from <span class="highlight">{{ employment_start }}</span>.
+  </div>
+
+  <!-- Employment & Salary Details -->
+  <table class="details-table">
+    <tr>
+      <th colspan="2">Employment Details</th>
+    </tr>
+    <tr>
+      <td class="label">Employee Code</td>
+      <td class="value">{{ employee.employee_code }}</td>
+    </tr>
+    <tr>
+      <td class="label">Full Name</td>
+      <td class="value">{{ employee.full_name }}</td>
+    </tr>
+    <tr>
+      <td class="label">Position</td>
+      <td class="value">{{ employee.position }}</td>
+    </tr>
+    <tr>
+      <td class="label">Department</td>
+      <td class="value">{{ employee.department }}</td>
+    </tr>
+    <tr>
+      <td class="label">Employment Type</td>
+      <td class="value">{{ employee.employment_type }}</td>
+    </tr>
+    <tr>
+      <td class="label">Start Date</td>
+      <td class="value">{{ employment_start }}</td>
+    </tr>
+
+    <tr>
+      <th colspan="2" class="salary-header">Remuneration Details ({{ currency }})</th>
+    </tr>
+    <tr>
+      <td class="label">Basic Salary</td>
+      <td class="value">{{ "{:,.2f}".format(employee.basic_salary) }} {{ currency }}</td>
+    </tr>
+    <tr>
+      <td class="label">Housing Allowance</td>
+      <td class="value">{{ "{:,.2f}".format(employee.housing_allowance) }} {{ currency }}</td>
+    </tr>
+    <tr>
+      <td class="label">Transport Allowance</td>
+      <td class="value">{{ "{:,.2f}".format(employee.transport_allowance) }} {{ currency }}</td>
+    </tr>
+    <tr class="salary-total">
+      <td class="label">Total Monthly Salary</td>
+      <td class="value">{{ "{:,.2f}".format(total_salary) }} {{ currency }}</td>
+    </tr>
+  </table>
+
+  <!-- Closing -->
+  <div class="closing">
+    This certificate is issued upon the employee's request for official purposes only and carries
+    no further commitment or guarantee on the part of {{ company_name }}.
+  </div>
+
+  <!-- Signature -->
+  <div class="signature-block">
+    <div class="sig-left">
+      Issued on: {{ issue_date }}<br>
+      Document ID: {{ doc_id }}
+    </div>
+    <div class="sig-right">
+      <div class="sig-line"></div>
+      <div class="sig-name">{{ signatory_name }}</div>
+      <div class="sig-title">{{ signatory_title }}</div>
+      <div class="sig-company">{{ company_name }}</div>
+    </div>
+  </div>
+
+  <div class="confidential">Confidential · For Official Use Only</div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span>{{ company_name }} · {{ address }}</span>
+    <span>Generated by Fotopia HR Agent · {{ issue_date }}</span>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,156 @@
+-- CTE creates the tenant and employees in one atomic statement.
+WITH fotopia AS (
+    INSERT INTO tenants (name, slug)
+    VALUES ('Fotopia Technologies', 'fotopia')
+    RETURNING id
+)
+INSERT INTO employees (
+    tenant_id, employee_code, full_name, arabic_name,
+    position, department, employment_type, start_date,
+    basic_salary, housing_allowance, transport_allowance, total_salary,
+    currency, annual_leave_balance, email, manager_name
+)
+SELECT
+    fotopia.id,
+    emp.employee_code, emp.full_name, emp.arabic_name,
+    emp.position, emp.department, emp.employment_type, emp.start_date::DATE,
+    emp.basic_salary, emp.housing_allowance, emp.transport_allowance, emp.total_salary,
+    'EGP', emp.annual_leave_balance, emp.email, emp.manager_name
+FROM fotopia, (VALUES
+    ('EMP001', 'Saif Ahmed Hassan',  'سيف أحمد حسن',    'Software Engineer',  'R&D',  'Full-time', '2022-03-15', 20000, 2500, 1500, 24000, 8,  'saif.hassan@fotopia.ai',    'Dr. Ahmed El-Yazbi'),
+    ('EMP002', 'Nourhan Hosny',      'نورهان حسني',      'HR Project Lead',    'HR',   'Full-time', '2021-06-01', 24000, 3000, 2000, 29000, 12, 'nourhan.hosny@fotopia.ai',  'Raef Eid'),
+    ('EMP003', 'Omar Alsayed',       'عمر السيد',        'ML Engineer',        'R&D',  'Full-time', '2023-01-10', 21500, 2500, 2000, 26000, 5,  'omar.alsayed@fotopia.ai',   'Dr. Ahmed El-Yazbi')
+) AS emp(employee_code, full_name, arabic_name, position, department, employment_type, start_date, basic_salary, housing_allowance, transport_allowance, total_salary, annual_leave_balance, email, manager_name);
+
+-- Set manager_id FK. EMP001 and EMP003 (R&D) report to EMP002 (Nourhan, HR Lead) for
+-- leave approvals in the demo. In production, Dr. Ahmed El-Yazbi and Raef Eid would be
+-- added as employee records and linked here.
+UPDATE employees e
+SET manager_id = mgr.id
+FROM employees mgr
+WHERE e.employee_code IN ('EMP001', 'EMP003')
+  AND mgr.employee_code = 'EMP002'
+  AND e.tenant_id = mgr.tenant_id;
+
+-- ─── Leave types (9 types) ────────────────────────────────────────────────────
+-- Columns: code, name_en, name_ar, requires_approval, requires_documentation,
+--          deducts_balance, is_time_based, requires_hr_review,
+--          max_days_per_year, max_consecutive_days
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'annual', 'Annual Leave', 'إجازة سنوية', TRUE, FALSE, TRUE, FALSE, TRUE, 21, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'sick', 'Sick Leave', 'إجازة مرضية', TRUE, TRUE, TRUE, FALSE, TRUE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'emergency', 'Emergency Leave', 'إجازة طارئة', TRUE, FALSE, FALSE, FALSE, TRUE, NULL, 6
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'permission', 'Permission', 'إذن خروج', TRUE, FALSE, FALSE, TRUE, FALSE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'business_trip', 'Business Trip', 'رحلة عمل', TRUE, FALSE, FALSE, FALSE, TRUE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'wfh', 'Work From Home', 'عمل من المنزل', TRUE, FALSE, FALSE, FALSE, FALSE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'outside_duty', 'Outside Duty', 'مهمة خارجية', TRUE, FALSE, FALSE, FALSE, FALSE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'compensatory', 'Compensatory Off', 'إجازة تعويضية', TRUE, FALSE, TRUE, FALSE, TRUE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'unpaid', 'Unpaid Leave', 'إجازة بدون مرتب', TRUE, FALSE, FALSE, FALSE, TRUE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+-- ─── Leave balances for 2026 ──────────────────────────────────────────────────
+-- Annual leave: all three employees were hired before 2026 → full 21-day allocation.
+-- Proration applies only in the hire year; subsequent years are always full.
+INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, year, allocated_days, used_days, pending_days)
+SELECT e.tenant_id, e.id, lt.id, 2026, 21.0, 0.0, 0.0
+FROM employees e
+JOIN leave_types lt ON lt.tenant_id = e.tenant_id AND lt.code = 'annual'
+JOIN tenants t ON t.id = e.tenant_id
+WHERE t.slug = 'fotopia';
+
+-- Sick leave: 90 days allocated per year (Egyptian Labor Law — 90 days fully/partially paid).
+INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, year, allocated_days, used_days, pending_days)
+SELECT e.tenant_id, e.id, lt.id, 2026, 90.0, 0.0, 0.0
+FROM employees e
+JOIN leave_types lt ON lt.tenant_id = e.tenant_id AND lt.code = 'sick'
+JOIN tenants t ON t.id = e.tenant_id
+WHERE t.slug = 'fotopia';
+
+-- Compensatory off: starts at 0; earned by working weekends/holidays (future integration).
+INSERT INTO leave_balances (tenant_id, employee_id, leave_type_id, year, allocated_days, used_days, pending_days)
+SELECT e.tenant_id, e.id, lt.id, 2026, 0.0, 0.0, 0.0
+FROM employees e
+JOIN leave_types lt ON lt.tenant_id = e.tenant_id AND lt.code = 'compensatory'
+JOIN tenants t ON t.id = e.tenant_id
+WHERE t.slug = 'fotopia';
+
+-- ─── Leave policies (flat model — one row per leave type) ─────────────────────
+
+-- annual: 21 days/year, 90-day probation block, 2 days minimum notice
+INSERT INTO leave_policies (tenant_id, leave_type_id, probation_restriction_days, annual_allowance_days, min_notice_days)
+SELECT t.id, lt.id, 90, 21, 2
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'annual'
+WHERE t.slug = 'fotopia';
+
+-- sick: medical certificate required after 3 consecutive days; no probation restriction
+INSERT INTO leave_policies (tenant_id, leave_type_id, requires_medical_cert_after_days)
+SELECT t.id, lt.id, 3
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'sick'
+WHERE t.slug = 'fotopia';
+
+-- emergency: max 6 days per request; no probation restriction (genuine emergencies)
+INSERT INTO leave_policies (tenant_id, leave_type_id, max_consecutive_days)
+SELECT t.id, lt.id, 6
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'emergency'
+WHERE t.slug = 'fotopia';
+
+-- permission: 1 hour minimum (enforced in tool logic); no day-based limits
+INSERT INTO leave_policies (tenant_id, leave_type_id)
+SELECT t.id, lt.id
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'permission'
+WHERE t.slug = 'fotopia';
+
+-- business_trip: no special policy limits
+INSERT INTO leave_policies (tenant_id, leave_type_id)
+SELECT t.id, lt.id
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'business_trip'
+WHERE t.slug = 'fotopia';
+
+-- wfh: max 2 days per week, max 8 days per month
+INSERT INTO leave_policies (tenant_id, leave_type_id, wfh_max_days_per_week, wfh_max_days_per_month)
+SELECT t.id, lt.id, 2, 8
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'wfh'
+WHERE t.slug = 'fotopia';
+
+-- outside_duty: no special policy limits
+INSERT INTO leave_policies (tenant_id, leave_type_id)
+SELECT t.id, lt.id
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'outside_duty'
+WHERE t.slug = 'fotopia';
+
+-- compensatory: must have earned balance; no other restrictions
+INSERT INTO leave_policies (tenant_id, leave_type_id)
+SELECT t.id, lt.id
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'compensatory'
+WHERE t.slug = 'fotopia';
+
+-- unpaid: 90-day probation restriction
+INSERT INTO leave_policies (tenant_id, leave_type_id, probation_restriction_days)
+SELECT t.id, lt.id, 90
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'unpaid'
+WHERE t.slug = 'fotopia';

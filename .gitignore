@@ -1,0 +1,11 @@
+.env
+.venv/
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+backend/documents/*.pdf
+node_modules/
+frontend/dist/
+.DS_Store

@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+anthropic>=0.40.0
+openai==1.50.2
+psycopg2-binary==2.9.9
+python-dotenv==1.0.1
+pydantic==2.8.2
+jinja2==3.1.4
+fpdf2==2.7.9
+azure-communication-email==1.0.0
