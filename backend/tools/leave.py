@@ -731,6 +731,22 @@ class ApproveLeaveRequestTool(Tool):
         if not ok:
             return ToolResult(success=False, error="Failed to update leave request status.")
 
+        # Commit balance: move days from pending → used (mirrors resolve_pending_action email-link path)
+        if lr.get("deducts_balance") and lr.get("days_requested") and lr.get("leave_type_id") and lr.get("employee_id"):
+            ref_date = lr.get("start_date") or (
+                lr.get("start_datetime", "")[:10] if lr.get("start_datetime") else None
+            )
+            if ref_date:
+                year = int(ref_date[:4])
+                self._ds.update_leave_balance(
+                    ctx.tenant_id,
+                    lr["employee_id"],
+                    lr["leave_type_id"],
+                    year,
+                    delta_pending=-float(lr["days_requested"]),
+                    delta_used=+float(lr["days_requested"]),
+                )
+
         # Notify employee
         employee = self._ds.get_employee_by_code(ctx.tenant_id, lr["employee_code"])
         if employee and employee.get("email"):
