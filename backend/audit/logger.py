@@ -41,6 +41,8 @@ class AuditLogger:
             conn = psycopg2.connect(self._database_url)
             with conn:
                 with conn.cursor() as cur:
+                    cur.execute("SET ROLE fotopia_app")
+                    cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
                     cur.execute(
                         """
                         INSERT INTO audit_log

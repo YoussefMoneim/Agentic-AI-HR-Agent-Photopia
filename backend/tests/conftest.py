@@ -23,7 +23,7 @@ import pytest
 
 import config
 from audit.logger import AuditLogger
-from data.mock import MockDataSource
+from data.postgresql import PostgreSQLDataSource
 from tools.base import ToolContext
 from tools.registry import build_registry
 
@@ -37,7 +37,9 @@ def _cleanup(database_url: str, tenant_id: str) -> None:
     try:
         with conn:
             with conn.cursor() as cur:
-                # Delete in FK dependency order
+                cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
+                # Delete in FK dependency order (workflow_events → pending_actions → workflow_instances)
+                cur.execute("DELETE FROM workflow_events   WHERE tenant_id = %s", (tenant_id,))
                 cur.execute("DELETE FROM pending_actions   WHERE tenant_id = %s", (tenant_id,))
                 cur.execute("DELETE FROM workflow_instances WHERE tenant_id = %s", (tenant_id,))
                 cur.execute("DELETE FROM leave_requests    WHERE tenant_id = %s", (tenant_id,))
@@ -79,14 +81,44 @@ def tenant_id(database_url: str) -> str:
 
 
 @pytest.fixture(scope="session")
-def ds(database_url: str) -> MockDataSource:
-    return MockDataSource(database_url)
+def ds(database_url: str) -> PostgreSQLDataSource:
+    return PostgreSQLDataSource(database_url)
 
 
 @pytest.fixture(scope="session")
-def registry(ds: MockDataSource, database_url: str):
+def registry(ds: PostgreSQLDataSource, database_url: str):
     audit_logger = AuditLogger(database_url)
     return build_registry(ds, audit_logger)
+
+
+@pytest.fixture(scope="session")
+def client():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture(scope="session")
+def make_jwt(tenant_id: str):
+    """Factory that returns a signed JWT for any employee_code + role combo.
+
+    Usage::
+        token = make_jwt(employee_code="EMP002", role="hr_manager")
+        headers = {"Authorization": f"Bearer {token}"}
+    """
+    from core.auth import issue_jwt
+
+    def _make(employee_code: str, role: str) -> str:
+        return issue_jwt(
+            user_id=f"test-{employee_code.lower()}",
+            role=role,
+            tenant_id=tenant_id,
+            employee_code=employee_code,
+            display_name=employee_code,
+        )
+
+    return _make
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -102,9 +134,11 @@ def reset_leave_data(database_url: str, tenant_id: str):
 
 
 @pytest.fixture
-def db_conn(database_url: str):
+def db_conn(database_url: str, tenant_id: str):
     """Raw psycopg2 connection for direct DB assertions. Auto-closed after test."""
     conn = psycopg2.connect(database_url)
+    with conn.cursor() as cur:
+        cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
     yield conn
     conn.close()
 
@@ -141,6 +175,7 @@ def recently_hired_employee(database_url: str, tenant_id: str):
     try:
         with conn:
             with conn.cursor() as cur:
+                cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
                 cur.execute(
                     """
                     INSERT INTO employees (tenant_id, employee_code, full_name, department,
@@ -159,6 +194,7 @@ def recently_hired_employee(database_url: str, tenant_id: str):
     try:
         with conn:
             with conn.cursor() as cur:
+                cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
                 cur.execute(
                     "DELETE FROM employees WHERE tenant_id = %s AND employee_code = %s",
                     (tenant_id, emp_code),

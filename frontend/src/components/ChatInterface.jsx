@@ -25,7 +25,7 @@ const WELCOME = {
     "Hello Nourhan! I can show pending approvals, look up employee data, and generate official HR documents. What would you like to do?",
 }
 
-export default function ChatInterface({ demoRole }) {
+export default function ChatInterface({ demoRole, onInboxToggle }) {
   const welcome = WELCOME[demoRole] || WELCOME.hr_manager
   const [messages, setMessages] = useState([
     { id: 0, role: 'agent', text: welcome, documents: [] },
@@ -42,7 +42,7 @@ export default function ChatInterface({ demoRole }) {
   }, [messages])
 
   useEffect(() => {
-    if (demoRole !== 'hr_manager') return
+    if (!onInboxToggle) return  // only poll for HR roles that have the inbox
     async function pollPending() {
       try {
         const data = await fetchPendingCount()
@@ -52,7 +52,7 @@ export default function ChatInterface({ demoRole }) {
     pollPending()
     const id = setInterval(pollPending, 10000)
     return () => clearInterval(id)
-  }, [demoRole])
+  }, [demoRole, onInboxToggle])
 
   async function handleSend(text) {
     const msg = (text ?? input).trim()
@@ -180,10 +180,10 @@ export default function ChatInterface({ demoRole }) {
           </button>
         </div>
 
-        {/* Pending approvals alert — HR manager only */}
-        {demoRole === 'hr_manager' && pendingCount > 0 && (
+        {/* Pending approvals alert — HR roles only */}
+        {onInboxToggle && pendingCount > 0 && (
           <button
-            onClick={() => handleSend('Show pending approvals')}
+            onClick={onInboxToggle}
             disabled={loading}
             style={{
               display: 'flex',

@@ -20,6 +20,7 @@ class ToolResult:
     document_type: str | None = None  # e.g. "salary_certificate", "twimc_letter", "experience_certificate"
     data_fields_accessed: list[str] | None = None  # sensitive field names read; written to audit_log
     action_type: str = "tool_executed"  # tool_executed | data_read | data_write | decision_denied
+    authz_note: str | None = None     # tool-signalled authz decision override written to audit_log.authz_decision
 
 
 @dataclass

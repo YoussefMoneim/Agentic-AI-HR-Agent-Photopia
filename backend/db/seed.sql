@@ -154,3 +154,21 @@ INSERT INTO leave_policies (tenant_id, leave_type_id, probation_restriction_days
 SELECT t.id, lt.id, 90
 FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'unpaid'
 WHERE t.slug = 'fotopia';
+
+-- ─── Demo users (login credentials for testing / demo) ───────────────────────
+-- All demo accounts share password 'demo123' (bcrypt hash). Never ship to production.
+INSERT INTO users (tenant_id, email, full_name, role, employee_id, password_hash)
+SELECT
+    t.id,
+    e.email,
+    e.full_name,
+    CASE e.employee_code
+        WHEN 'EMP001' THEN 'employee'
+        WHEN 'EMP002' THEN 'hr_manager'
+        WHEN 'EMP003' THEN 'employee'
+    END,
+    e.id,
+    '$2b$12$4qFSJ1YZ.CoCCX/TPUU2E.J/gcu4v5wiQz42fxPlwJCI6U7rxjfZO'
+FROM tenants t
+JOIN employees e ON e.tenant_id = t.id AND e.employee_code IN ('EMP001', 'EMP002', 'EMP003')
+WHERE t.slug = 'fotopia';

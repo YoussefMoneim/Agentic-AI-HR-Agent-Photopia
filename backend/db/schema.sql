@@ -5,6 +5,7 @@ CREATE TABLE tenants (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     slug TEXT UNIQUE NOT NULL,
+    settings JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -17,6 +18,7 @@ CREATE TABLE users (
     full_name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'employee',
     employee_id UUID,
+    password_hash TEXT,   -- bcrypt hash; NULL = no password login configured
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, email)
 );
@@ -121,7 +123,8 @@ CREATE TABLE leave_requests (
     duration_hours NUMERIC(4,1),  -- e.g. 2.0 hours
 
     reason TEXT,
-    attachment_path TEXT,  -- path to uploaded medical cert, etc.
+    attachment_path TEXT,              -- path to uploaded medical cert, etc.
+    has_medical_certificate BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- Approval chain — manager stored at submission from DB, never from user input
     manager_id UUID REFERENCES employees(id),
@@ -140,6 +143,7 @@ CREATE TABLE leave_requests (
     status TEXT NOT NULL DEFAULT 'pending_approval'
         CHECK (status IN (
             'pending_approval',
+            'pending_top_of_hierarchy',
             'manager_approved', 'manager_rejected',
             'hr_approved', 'hr_rejected',
             'cancelled', 'withdrawn', 'completed'
@@ -232,3 +236,89 @@ CREATE TABLE pending_actions (
 );
 CREATE INDEX ON pending_actions(tenant_id, status, deadline_at);
 CREATE INDEX ON pending_actions(correlation_token);
+
+-- ─── Workflow events ──────────────────────────────────────────────────────────
+-- Append-only audit trail for workflow state transitions.
+-- Separate from audit_log (tool calls) — this logs state machine transitions.
+-- workflow_instance_id is nullable: appropriateness_flag events are written from
+-- document tools that have no associated workflow instance.
+CREATE TABLE workflow_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL,
+    workflow_instance_id UUID REFERENCES workflow_instances(id),
+    event_type TEXT NOT NULL,
+        -- 'submitted' | 'pending_approval_sent' | 'manager_approved'
+        -- | 'manager_rejected' | 'top_of_hierarchy_approved'
+        -- | 'cancelled' | 'completed' | 'timed_out'
+    actor_employee_id UUID REFERENCES employees(id),
+    actor_user_id TEXT,
+    data JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX ON workflow_events(tenant_id, workflow_instance_id);
+CREATE INDEX ON workflow_events(tenant_id, created_at DESC);
+
+-- ─── Row Level Security ───────────────────────────────────────────────────────
+-- All tenant-scoped tables require SET app.current_tenant_id = '<uuid>' on
+-- every connection before querying. Unset or NULL → 0 rows (fail-closed).
+-- See backend/db/migrations/001_add_rls.sql for the equivalent migration.
+
+ALTER TABLE users             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users             FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON users FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE employees         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employees         FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON employees FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE leave_types       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_types       FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON leave_types FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE leave_balances    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_balances    FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON leave_balances FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE leave_requests    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_requests    FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON leave_requests FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE leave_policies    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_policies    FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON leave_policies FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE workflow_instances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_instances FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON workflow_instances FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE pending_actions   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pending_actions   FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON pending_actions FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE workflow_events   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_events   FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON workflow_events FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE audit_log         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log         FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON audit_log FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);

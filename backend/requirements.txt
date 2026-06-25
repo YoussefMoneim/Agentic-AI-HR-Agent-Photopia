@@ -10,3 +10,5 @@ fpdf2==2.7.9
 azure-communication-email==1.0.0
 pytest>=8.0
 pytest-asyncio>=0.23
+PyJWT>=2.8.0
+bcrypt>=4.0.0

@@ -7,6 +7,7 @@ from fpdf import FPDF
 import config
 from data.base import DataSource
 from tools.base import Tool, ToolContext, ToolResult, ToolSpec
+from workflow.appropriateness import check_appropriateness
 
 
 # ── Shared PDF helpers ────────────────────────────────────────────────────────
@@ -459,6 +460,25 @@ class GenerateSalaryCertificateTool(Tool):
         if employee is None:
             return ToolResult(success=False, error=f"Employee '{code}' not found")
 
+        appropriateness = check_appropriateness(
+            ctx, "generate_document",
+            {"document_type": "salary_certificate", "employee_code": code, "recipient_role": None},
+            self._ds,
+        )
+        flag_data: dict | None = None
+        if appropriateness.flagged:
+            caller_emp = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code) if ctx.employee_code else None
+            event = self._ds.create_workflow_event(
+                ctx.tenant_id, None, "appropriateness_flag",
+                caller_emp["id"] if caller_emp else None,
+                ctx.user_id,
+                {"flag_code": appropriateness.flag_code, "reason": appropriateness.reason,
+                 "action": "generate_document", "document_type": "salary_certificate",
+                 "caller_role": ctx.role, "human_decision": None},
+            )
+            flag_data = {"flagged": True, "flag_code": appropriateness.flag_code,
+                         "reason": appropriateness.reason, "event_id": event["id"]}
+
         # Compute in Python — never let the LLM do financial arithmetic
         total_salary = (
             float(employee.get("basic_salary") or 0)
@@ -487,19 +507,22 @@ class GenerateSalaryCertificateTool(Tool):
         output_path = Path(config.DOCUMENTS_DIR) / f"{doc_id}.pdf"
         output_path.write_bytes(pdf_bytes)  # file is served later via GET /documents/{doc_id}
 
+        result_data = {
+            "document_id": doc_id,
+            "employee_name": employee["full_name"],
+            "employee_code": code,
+            "total_salary": total_salary,
+            "currency": config.TENANT_CONFIG["currency"],
+            "issue_date": issue_date,
+            "message": f"Salary certificate generated for {employee['full_name']}",
+        }
+        if flag_data is not None:
+            result_data["appropriateness_flag"] = flag_data
         return ToolResult(
             success=True,
             document_id=doc_id,
             document_type="salary_certificate",
-            data={
-                "document_id": doc_id,
-                "employee_name": employee["full_name"],
-                "employee_code": code,
-                "total_salary": total_salary,
-                "currency": config.TENANT_CONFIG["currency"],
-                "issue_date": issue_date,
-                "message": f"Salary certificate generated for {employee['full_name']}",
-            },
+            data=result_data,
             action_type="data_write",
         )
 
@@ -547,6 +570,25 @@ class GenerateTwimcLetterTool(Tool):
         if employee is None:
             return ToolResult(success=False, error=f"Employee '{code}' not found")
 
+        appropriateness = check_appropriateness(
+            ctx, "generate_document",
+            {"document_type": "twimc_letter", "employee_code": code, "recipient_role": None},
+            self._ds,
+        )
+        flag_data: dict | None = None
+        if appropriateness.flagged:
+            caller_emp = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code) if ctx.employee_code else None
+            event = self._ds.create_workflow_event(
+                ctx.tenant_id, None, "appropriateness_flag",
+                caller_emp["id"] if caller_emp else None,
+                ctx.user_id,
+                {"flag_code": appropriateness.flag_code, "reason": appropriateness.reason,
+                 "action": "generate_document", "document_type": "twimc_letter",
+                 "caller_role": ctx.role, "human_decision": None},
+            )
+            flag_data = {"flagged": True, "flag_code": appropriateness.flag_code,
+                         "reason": appropriateness.reason, "event_id": event["id"]}
+
         addressed_to = input.get("addressed_to", "").strip() or "To Whom It May Concern"
         purpose = input.get("purpose", "").strip() or "official purposes"
 
@@ -572,19 +614,22 @@ class GenerateTwimcLetterTool(Tool):
         output_path = Path(config.DOCUMENTS_DIR) / f"{doc_id}.pdf"
         output_path.write_bytes(pdf_bytes)
 
+        result_data = {
+            "document_id": doc_id,
+            "employee_name": employee["full_name"],
+            "employee_code": code,
+            "addressed_to": addressed_to,
+            "purpose": purpose,
+            "issue_date": issue_date,
+            "message": f"Employment letter generated for {employee['full_name']}",
+        }
+        if flag_data is not None:
+            result_data["appropriateness_flag"] = flag_data
         return ToolResult(
             success=True,
             document_id=doc_id,
             document_type="twimc_letter",
-            data={
-                "document_id": doc_id,
-                "employee_name": employee["full_name"],
-                "employee_code": code,
-                "addressed_to": addressed_to,
-                "purpose": purpose,
-                "issue_date": issue_date,
-                "message": f"Employment letter generated for {employee['full_name']}",
-            },
+            data=result_data,
             action_type="data_write",
         )
 
@@ -628,6 +673,25 @@ class GenerateExperienceCertificateTool(Tool):
         if employee is None:
             return ToolResult(success=False, error=f"Employee '{code}' not found")
 
+        appropriateness = check_appropriateness(
+            ctx, "generate_document",
+            {"document_type": "experience_certificate", "employee_code": code, "recipient_role": None},
+            self._ds,
+        )
+        flag_data: dict | None = None
+        if appropriateness.flagged:
+            caller_emp = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code) if ctx.employee_code else None
+            event = self._ds.create_workflow_event(
+                ctx.tenant_id, None, "appropriateness_flag",
+                caller_emp["id"] if caller_emp else None,
+                ctx.user_id,
+                {"flag_code": appropriateness.flag_code, "reason": appropriateness.reason,
+                 "action": "generate_document", "document_type": "experience_certificate",
+                 "caller_role": ctx.role, "human_decision": None},
+            )
+            flag_data = {"flagged": True, "flag_code": appropriateness.flag_code,
+                         "reason": appropriateness.reason, "event_id": event["id"]}
+
         doc_id = str(uuid.uuid4())
         today = date.today()
         issue_date = today.strftime("%d %B %Y")
@@ -656,18 +720,21 @@ class GenerateExperienceCertificateTool(Tool):
         output_path = Path(config.DOCUMENTS_DIR) / f"{doc_id}.pdf"
         output_path.write_bytes(pdf_bytes)
 
+        result_data = {
+            "document_id": doc_id,
+            "employee_name": employee["full_name"],
+            "employee_code": code,
+            "employment_start": employment_start,
+            "last_working_day": last_working_day,
+            "issue_date": issue_date,
+            "message": f"Experience certificate generated for {employee['full_name']}",
+        }
+        if flag_data is not None:
+            result_data["appropriateness_flag"] = flag_data
         return ToolResult(
             success=True,
             document_id=doc_id,
             document_type="experience_certificate",
-            data={
-                "document_id": doc_id,
-                "employee_name": employee["full_name"],
-                "employee_code": code,
-                "employment_start": employment_start,
-                "last_working_day": last_working_day,
-                "issue_date": issue_date,
-                "message": f"Experience certificate generated for {employee['full_name']}",
-            },
+            data=result_data,
             action_type="data_write",
         )

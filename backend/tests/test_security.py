@@ -127,6 +127,7 @@ class TestAuditLog:
         conn = psycopg2.connect(database_url)
         try:
             with conn.cursor() as cur:
+                cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
                 cur.execute(
                     """
                     SELECT action, outcome, actor_role
@@ -160,6 +161,7 @@ class TestAuditLog:
         conn = psycopg2.connect(database_url)
         try:
             with conn.cursor() as cur:
+                cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
                 cur.execute(
                     """
                     SELECT action, outcome
@@ -183,38 +185,124 @@ class TestAuditLog:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# RLS — Row-Level Security (Phase 1.5 TODO)
+# RLS — Row-Level Security
 # ═══════════════════════════════════════════════════════════════════════════════
+
+TENANT_TABLES = [
+    "users", "employees", "leave_types", "leave_balances",
+    "leave_requests", "leave_policies", "workflow_instances",
+    "pending_actions", "workflow_events", "audit_log",
+]
+
 
 class TestRowLevelSecurity:
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "RLS not yet enabled — Phase 1.5 TODO. "
-            "Once FORCE RLS is added to all tenant_id tables, a query without "
-            "a tenant_id filter must return 0 rows even as a DB superuser."
-        ),
-    )
-    def test_rls_prevents_cross_tenant_query(self, database_url, tenant_id):
-        """
-        Direct SQL without tenant_id filter must return 0 rows when RLS is enforced.
-        This test is xfail until Phase 1.5 adds FORCE ROW LEVEL SECURITY to every table.
-
-        Current behaviour: query returns all rows (no RLS).
-        Expected behaviour (Phase 1.5): query returns 0 rows (RLS filters by tenant_id).
-        """
+    def test_rls_prevents_cross_tenant_query(self, database_url):
+        """Direct SQL without tenant variable must return 0 rows (fail-closed)."""
         conn = psycopg2.connect(database_url)
         try:
             with conn.cursor() as cur:
-                # This query intentionally omits the tenant_id filter.
-                # With RLS enabled+forced, it should return 0 rows.
+                cur.execute("SET ROLE fotopia_app")  # non-superuser; subject to RLS
                 cur.execute("SELECT COUNT(*) FROM employees")
-                total = cur.fetchone()[0]
-            # Phase 1.5 expectation: RLS returns 0 rows for a non-tenant session
-            assert total == 0, (
-                f"RLS not enforced: {total} employee rows visible without tenant filter. "
-                "Add FORCE ROW LEVEL SECURITY + policy to the employees table."
-            )
+                assert cur.fetchone()[0] == 0, (
+                    "RLS not enforced: employee rows visible without tenant variable. "
+                    "Run migration 001_add_rls.sql to enable FORCE ROW LEVEL SECURITY."
+                )
         finally:
             conn.close()
+
+
+class TestRLSEnforced:
+    """CI guardrail: all tenant tables must have ENABLE + FORCE RLS."""
+
+    def test_all_tenant_tables_have_force_rls(self, database_url):
+        conn = psycopg2.connect(database_url)
+        try:
+            with conn.cursor() as cur:
+                for table in TENANT_TABLES:
+                    cur.execute(
+                        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                        "WHERE relname = %s AND relkind = 'r'",
+                        (table,),
+                    )
+                    row = cur.fetchone()
+                    assert row and row[0] and row[1], (
+                        f"{table}: relrowsecurity={row[0] if row else 'missing'}, "
+                        f"relforcerowsecurity={row[1] if row else 'missing'} — both must be True"
+                    )
+        finally:
+            conn.close()
+
+    def test_no_tenant_set_returns_zero_rows(self, database_url):
+        """Unset tenant variable → 0 rows across all tenant tables (fail-closed)."""
+        conn = psycopg2.connect(database_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET ROLE fotopia_app")  # non-superuser; subject to RLS
+                for table in TENANT_TABLES:
+                    cur.execute(f"SELECT COUNT(*) FROM {table}")
+                    assert cur.fetchone()[0] == 0, (
+                        f"{table}: rows visible without tenant variable — RLS not enforced"
+                    )
+        finally:
+            conn.close()
+
+    def test_wrong_tenant_returns_zero_rows(self, database_url):
+        """Fake tenant UUID → 0 rows (cross-tenant isolation)."""
+        conn = psycopg2.connect(database_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET ROLE fotopia_app")  # non-superuser; subject to RLS
+                cur.execute(
+                    "SET app.current_tenant_id = %s",
+                    ("00000000-0000-0000-0000-000000000000",),
+                )
+                cur.execute("SELECT COUNT(*) FROM employees")
+                assert cur.fetchone()[0] == 0, "Cross-tenant isolation not enforced"
+        finally:
+            conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Field masking — salary null for hr_staff, visible for hr_manager/admin/employee
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestFieldMasking:
+
+    def test_hr_staff_get_employee_data_salary_is_null(self, registry, ctx):
+        """hr_staff calling get_employee_data must receive null salary fields."""
+        staff_ctx = ctx(role="hr_staff")
+        result = registry.execute("get_employee_data", {"employee_code": "EMP001"}, staff_ctx)
+        assert result.success, f"Expected success but got: {result.error}"
+        emp = result.data["employee"]
+        for field in ("basic_salary", "housing_allowance", "transport_allowance", "total_salary"):
+            assert emp.get(field) is None, (
+                f"hr_staff must not see {field} — got {emp.get(field)!r}"
+            )
+
+    def test_employee_get_own_data_salary_is_not_null(self, registry, ctx):
+        """An employee reading their own record must see their salary fields."""
+        emp_ctx = ctx(role="employee")
+        result = registry.execute("get_employee_data", {"employee_code": "EMP001"}, emp_ctx)
+        assert result.success, f"Expected success but got: {result.error}"
+        emp = result.data["employee"]
+        assert emp.get("basic_salary") is not None, "Employee must see own basic_salary"
+
+    def test_hr_manager_get_employee_data_salary_is_not_null(self, registry, ctx):
+        """hr_manager must see salary fields — no masking for this role."""
+        mgr_ctx = ctx(role="hr_manager")
+        result = registry.execute("get_employee_data", {"employee_code": "EMP001"}, mgr_ctx)
+        assert result.success, f"Expected success but got: {result.error}"
+        emp = result.data["employee"]
+        assert emp.get("basic_salary") is not None, "hr_manager must see basic_salary"
+
+    def test_hr_staff_cannot_call_calculate_end_of_service(self, registry, ctx):
+        """calculate_end_of_service is gated to hr_manager/admin only (Gate 1)."""
+        staff_ctx = ctx(role="hr_staff")
+        result = registry.execute(
+            "calculate_end_of_service",
+            {"employee_code": "EMP001", "last_working_day": "2025-12-31"},
+            staff_ctx,
+        )
+        assert not result.success
+        assert "not permitted" in (result.error or "").lower() or "denied" in (result.error or "").lower()

@@ -1,7 +1,9 @@
 from datetime import date
 
+from core.access import can_access
 from data.base import DataSource
 from tools.base import Tool, ToolContext, ToolResult, ToolSpec
+from workflow.appropriateness import check_appropriateness
 
 
 class SearchEmployeesTool(Tool):
@@ -126,13 +128,16 @@ class GetEmployeeDataTool(Tool):
         if not code:
             return ToolResult(success=False, error="employee_code is required")
 
-        # Row-level security: HR sees any record, employees only see their own
-        if ctx.role == "employee" and code != ctx.employee_code:
-            return ToolResult(success=False, error="Access denied: you may only view your own record")
+        decision = can_access(ctx, "read_employee_row", {"employee_code": code})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         employee = self._ds.get_employee_by_code(ctx.tenant_id, code)
         if employee is None:
             return ToolResult(success=False, error=f"Employee '{code}' not found")
+
+        for fld in decision.masked_fields:
+            employee[fld] = None
 
         return ToolResult(success=True, data={"employee": employee}, action_type="data_read")
 
@@ -165,9 +170,9 @@ class GetLeaveBalanceTool(Tool):
         if not code:
             return ToolResult(success=False, error="employee_code is required")
 
-        # Row-level security: HR sees any record, employees only see their own
-        if ctx.role == "employee" and code != ctx.employee_code:
-            return ToolResult(success=False, error="Access denied: you may only check your own leave balance")
+        decision = can_access(ctx, "read_leave_balance", {"employee_code": code})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         balance = self._ds.get_leave_balance(ctx.tenant_id, code)
         if balance is None:
@@ -206,13 +211,16 @@ class GetEmployeeSummaryTool(Tool):
         if not code:
             return ToolResult(success=False, error="employee_code is required")
 
-        # Row-level security: HR sees any record, employees only see their own
-        if ctx.role == "employee" and code != ctx.employee_code:
-            return ToolResult(success=False, error="Access denied: you may only view your own record")
+        decision = can_access(ctx, "read_employee_row", {"employee_code": code})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         employee = self._ds.get_employee_by_code(ctx.tenant_id, code)
         if employee is None:
             return ToolResult(success=False, error=f"Employee '{code}' not found")
+
+        for fld in decision.masked_fields:
+            employee[fld] = None
 
         balance = self._ds.get_leave_balance(ctx.tenant_id, code)
 
@@ -263,9 +271,9 @@ class GetEmployeeDocumentsTool(Tool):
         if not code:
             return ToolResult(success=False, error="employee_code is required")
 
-        # Row-level security: HR sees any record, employees only see their own
-        if ctx.role == "employee" and code != ctx.employee_code:
-            return ToolResult(success=False, error="Access denied: you may only view your own documents")
+        decision = can_access(ctx, "read_employee_row", {"employee_code": code})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         employee = self._ds.get_employee_by_code(ctx.tenant_id, code)
         if employee is None:
@@ -293,16 +301,36 @@ class GetEmployeeDocumentsTool(Tool):
                 "outcome": row.get("outcome", ""),
             })
 
-        return ToolResult(
-            success=True,
-            data={
-                "employee_code": code,
-                "employee_name": employee["full_name"],
-                "documents": documents,
-                "count": len(documents),
-            },
-            action_type="data_read",
+        # Appropriateness check — use tool_name from raw rows for sensitivity key lookup
+        doc_type_keys = [r["tool_name"].replace("generate_", "") for r in rows]
+        appropriateness = check_appropriateness(
+            ctx, "access_document",
+            {"document_types": doc_type_keys},
+            self._ds,
         )
+        flag_data: dict | None = None
+        if appropriateness.flagged:
+            caller_emp = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code) if ctx.employee_code else None
+            event = self._ds.create_workflow_event(
+                ctx.tenant_id, None, "appropriateness_flag",
+                caller_emp["id"] if caller_emp else None,
+                ctx.user_id,
+                {"flag_code": appropriateness.flag_code, "reason": appropriateness.reason,
+                 "action": "access_document", "employee_code": code,
+                 "caller_role": ctx.role, "human_decision": None},
+            )
+            flag_data = {"flagged": True, "flag_code": appropriateness.flag_code,
+                         "reason": appropriateness.reason, "event_id": event["id"]}
+
+        result_data: dict = {
+            "employee_code": code,
+            "employee_name": employee["full_name"],
+            "documents": documents,
+            "count": len(documents),
+        }
+        if flag_data is not None:
+            result_data["appropriateness_flag"] = flag_data
+        return ToolResult(success=True, data=result_data, action_type="data_read")
 
 
 class CalculateEndOfServiceTool(Tool):
@@ -333,7 +361,7 @@ class CalculateEndOfServiceTool(Tool):
             },
             "required": ["employee_code", "last_working_day"],
         },
-        allowed_roles=["hr_staff", "hr_manager", "admin"],
+        allowed_roles=["hr_manager", "admin"],
     )
 
     def __init__(self, data_source: DataSource) -> None:

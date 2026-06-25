@@ -3,9 +3,19 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 import config
+from core.access import can_access
 from data.base import DataSource
 from services import email as email_svc
 from tools.base import Tool, ToolContext, ToolResult, ToolSpec
+from utils.prompt_security import sanitize_for_html_email, wrap_untrusted_content
+from workflow.constraints import evaluate_constraints
+from workflow.routing import get_routing_policy
+
+# SECURITY NOTE: Any user-provided text (reason, comment fields) that goes into
+# LLM context must be wrapped with wrap_untrusted_content() from utils.prompt_security.
+# Any user-provided text that goes into HTML email bodies must be passed through
+# sanitize_for_html_email(). This prevents indirect prompt injection (Rule 13 in CLAUDE.md).
+# Raw values are stored in the database as-is — protection applies at USE, not storage.
 
 
 def _today() -> date:
@@ -27,6 +37,123 @@ def _months_employed(start_date: date, reference_date: date) -> int:
 def _week_start(d: date) -> date:
     """Return the Monday of the week containing d."""
     return d - timedelta(days=d.weekday())
+
+
+_LEAVE_FIELD_REQUIREMENTS: dict[str, dict] = {
+    "annual":        {"reason_required": False},
+    "sick":          {"reason_required": False,
+                      "attachment_note": "A medical certificate is required for sick leave exceeding 3 consecutive days."},
+    "emergency":     {"reason_required": False},
+    "permission":    {"reason_required": False},
+    "wfh":           {"reason_required": False},
+    "compensatory":  {"reason_required": False},
+    "business_trip": {"reason_required": True,
+                      "reason_prompt": "What is the purpose of the business trip?",
+                      "attachment_prompt": "Do you have a travel authorisation or itinerary to attach? (optional)"},
+    "outside_duty":  {"reason_required": True,
+                      "reason_prompt": "What is the purpose of the outside duty assignment?"},
+    "unpaid":        {"reason_required": True,
+                      "reason_prompt": "What is the reason for the unpaid leave request?"},
+}
+
+
+# ─── Tool 0: check_request_completeness ──────────────────────────────────────
+
+class CheckRequestCompletenessTool(Tool):
+    spec = ToolSpec(
+        name="check_request_completeness",
+        description=(
+            "Check whether all required fields are present before submitting a leave request. "
+            "Call this FIRST, before check_leave_eligibility. "
+            "Returns complete=true/false, missing_fields list, prompts to show the user, and any warnings."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "leave_type_code": {
+                    "type": "string",
+                    "description": "annual, sick, emergency, permission, business_trip, wfh, outside_duty, compensatory, unpaid",
+                },
+                "start_date":     {"type": "string", "description": "Start date YYYY-MM-DD (not for permission)."},
+                "end_date":       {"type": "string", "description": "End date YYYY-MM-DD (not for permission)."},
+                "start_datetime": {"type": "string", "description": "Start datetime ISO 8601 (permission only)."},
+                "end_datetime":   {"type": "string", "description": "End datetime ISO 8601 (permission only)."},
+                "duration_hours": {"type": "number",  "description": "Duration in hours (permission only)."},
+                "reason":         {"type": "string",  "description": "Reason/note for types that require one."},
+            },
+            "required": ["leave_type_code"],
+        },
+        allowed_roles=["employee", "hr_staff", "hr_manager", "admin"],
+    )
+
+    def __init__(self, data_source: DataSource) -> None:
+        self._ds = data_source
+
+    def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        leave_type_code = input.get("leave_type_code", "").lower()
+
+        leave_type = self._ds.get_leave_type_by_code(ctx.tenant_id, leave_type_code)
+        if not leave_type:
+            return ToolResult(
+                success=False,
+                error=f"Unknown leave type '{leave_type_code}'. Valid: annual, sick, emergency, permission, business_trip, wfh, outside_duty, compensatory, unpaid.",
+            )
+
+        rules = _LEAVE_FIELD_REQUIREMENTS.get(leave_type_code, {"reason_required": False})
+        is_time_based = leave_type.get("is_time_based", False)
+
+        missing_fields: list[str] = []
+        prompts: list[str] = []
+        warnings: list[str] = []
+
+        if is_time_based:
+            has_duration = float(input.get("duration_hours") or 0) > 0
+            has_datetimes = bool(input.get("start_datetime")) and bool(input.get("end_datetime"))
+            if not has_duration and not has_datetimes:
+                missing_fields.append("duration_hours or start_datetime+end_datetime")
+                prompts.append(
+                    "Please provide the start and end time for the permission (e.g. '2 PM to 4 PM') or total hours."
+                )
+        else:
+            if not input.get("start_date"):
+                missing_fields.append("start_date")
+                prompts.append("What is the start date? (YYYY-MM-DD)")
+            if not input.get("end_date"):
+                missing_fields.append("end_date")
+                prompts.append("What is the end date? (YYYY-MM-DD)")
+
+        if rules.get("reason_required") and not input.get("reason"):
+            missing_fields.append("reason")
+            prompts.append(rules.get("reason_prompt", "Please provide a reason for this leave request."))
+
+        if rules.get("attachment_prompt"):
+            prompts.append(rules["attachment_prompt"])
+
+        if leave_type_code == "sick" and input.get("start_date") and input.get("end_date"):
+            try:
+                days = _calendar_days(_parse_date(input["start_date"]), _parse_date(input["end_date"]))
+                if days > 3:
+                    warnings.append(rules.get("attachment_note", ""))
+            except ValueError:
+                pass
+
+        complete = len(missing_fields) == 0
+
+        result_data: dict = {
+            "complete": complete,
+            "leave_type_name": leave_type["name_en"],
+            "missing_fields": missing_fields,
+            "prompts": prompts,
+            "warnings": [w for w in warnings if w],
+        }
+        if rules.get("attachment_note") and leave_type_code == "sick":
+            result_data["attachment_note"] = rules["attachment_note"]
+
+        return ToolResult(
+            success=True,
+            data=result_data,
+            action_type="data_read",
+        )
 
 
 # ─── Tool 1: check_leave_balance ─────────────────────────────────────────────
@@ -56,8 +183,9 @@ class CheckLeaveBalanceTool(Tool):
 
     def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
         employee_code = input.get("employee_code") or ctx.employee_code
-        if ctx.role == "employee" and employee_code != ctx.employee_code:
-            return ToolResult(success=False, error="You can only check your own leave balance.")
+        decision = can_access(ctx, "read_leave_balance", {"employee_code": employee_code})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         employee = self._ds.get_employee_by_code(ctx.tenant_id, employee_code)
         if not employee:
@@ -124,8 +252,9 @@ class CheckLeaveEligibilityTool(Tool):
 
     def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
         employee_code = input.get("employee_code") or ctx.employee_code
-        if ctx.role == "employee" and employee_code != ctx.employee_code:
-            return ToolResult(success=False, error="You can only check your own eligibility.")
+        decision = can_access(ctx, "read_leave_eligibility", {"employee_code": employee_code})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         leave_type_code = input.get("leave_type_code", "").lower()
 
@@ -374,13 +503,13 @@ class SubmitLeaveRequestTool(Tool):
         policy = self._ds.get_leave_policy(ctx.tenant_id, leave_type["id"]) or {}
         is_time_based = leave_type.get("is_time_based", False)
 
+        # Read per-tenant routing policy (deadline hours, top-of-hierarchy behaviour)
+        routing_policy = get_routing_policy(ctx.tenant_id, self._ds)
+
         # Manager lookup — from DB only, never from user input
         manager = self._ds.get_employee_manager(ctx.tenant_id, employee_code)
-        if not manager:
-            return ToolResult(
-                success=False,
-                error="No manager is assigned to your employee record. Please contact HR to update your profile before submitting leave requests.",
-            )
+        # Any role with no manager goes to the top-of-hierarchy path — never crash, never self-approve
+        is_top_of_hierarchy = manager is None
 
         # Prepare request data
         start_date = input.get("start_date")
@@ -452,7 +581,7 @@ class SubmitLeaveRequestTool(Tool):
             "duration_hours": duration_hours,
             "reason": input.get("reason"),
             "attachment_path": input.get("attachment_path"),
-            "manager_id": manager["id"],
+            "manager_id": manager["id"] if manager else None,
         }
         leave_request = self._ds.create_leave_request(ctx.tenant_id, lr_data)
 
@@ -468,11 +597,12 @@ class SubmitLeaveRequestTool(Tool):
                 "leave_request_id": leave_request["id"],
                 "employee_code": employee_code,
                 "leave_type_code": leave_type_code,
+                "top_of_hierarchy": is_top_of_hierarchy,
             },
         })
 
-        # Compute deadline (72 hours from now)
-        deadline = datetime.now(timezone.utc) + timedelta(hours=72)
+        # Compute deadline using per-tenant policy (default 72 hours)
+        deadline = datetime.now(timezone.utc) + timedelta(hours=routing_policy.default_deadline_hours)
 
         # Build approval URLs
         approve_url = f"{config.API_BASE_URL}/api/leave/resolve/{correlation_token}?decision=approved"
@@ -485,15 +615,59 @@ class SubmitLeaveRequestTool(Tool):
         else:
             dates_desc = f"from {start_date} to {end_date} ({days_requested:.0f} days)"
 
+        raw_reason = input.get("reason") or ""
+        # Wrap for LLM context (pending_actions.prompt_text, context_snapshot) — prevents injection
+        safe_reason_for_context = wrap_untrusted_content("LEAVE_REASON", raw_reason) if raw_reason else "Not provided"
+        # Escape for HTML email body — prevents XSS in manager's email client
+        safe_reason_for_email = sanitize_for_html_email(raw_reason) if raw_reason else "Not provided"
+
         prompt_text = (
             f"{employee['full_name']} has requested {leave_type['name_en']} {dates_desc}.\n\n"
-            f"Reason: {input.get('reason') or 'Not provided'}\n\n"
+            f"Reason: {safe_reason_for_context}\n\n"
             f"Approve: {approve_url}\n"
             f"Reject: {reject_url}\n"
         )
 
+        # Top-of-hierarchy path — flag and log; no pending_action, no email
+        if is_top_of_hierarchy:
+            self._ds.link_leave_request_to_workflow(
+                ctx.tenant_id, leave_request["id"], wf["id"]
+            )
+            self._ds.update_leave_request_status(
+                ctx.tenant_id, leave_request["id"], "pending_top_of_hierarchy", {}
+            )
+            self._ds.create_workflow_event(
+                ctx.tenant_id, wf["id"], "top_of_hierarchy_flagged",
+                employee["id"], ctx.user_id,
+                {"message": "Leave request flagged for board/delegate review — no manager assigned."},
+            )
+            return ToolResult(
+                success=True,
+                data={
+                    "request_id": leave_request["id"],
+                    "leave_type": leave_type["name_en"],
+                    "dates": dates_desc,
+                    "days_requested": days_requested,
+                    "status": "pending_top_of_hierarchy",
+                    "message": (
+                        "You are at the top of the reporting hierarchy. "
+                        "This request has been flagged and logged for board/delegate review."
+                    ),
+                },
+                data_fields_accessed=["employee_id", "manager_id", "leave_balance"],
+                action_type="data_write",
+                authz_note="top_of_hierarchy_flagged",
+            )
+
+        # Normal approval path — manager is not None below here
+        # Pre-generate pending_action UUID so we can embed it in the Message-ID header
+        pa_id = str(uuid.uuid4())
+        outbound_message_id = f"<{pa_id}@{config.EMAIL_MESSAGE_ID_DOMAIN}>"
+
         # Create pending action
         self._ds.create_pending_action(ctx.tenant_id, {
+            "pa_id": pa_id,
+            "outbound_message_id": outbound_message_id,
             "workflow_instance_id": wf["id"],
             "action_type": "email_approval",
             "assigned_to_employee_code": manager["employee_code"],
@@ -504,6 +678,7 @@ class SubmitLeaveRequestTool(Tool):
                 "employee_name": employee["full_name"],
                 "leave_type": leave_type_code,
                 "dates": dates_desc,
+                "reason": safe_reason_for_context,
             },
             "prompt_text": prompt_text,
             "deadline_at": deadline.isoformat(),
@@ -514,15 +689,19 @@ class SubmitLeaveRequestTool(Tool):
         self._ds.link_leave_request_to_workflow(
             ctx.tenant_id, leave_request["id"], wf["id"]
         )
-
-        # Send approval email to manager
+        # Send approval email — HTML body built separately to avoid XSS
+        email_subject = f"Leave Approval Required: {employee['full_name']} — {leave_type['name_en']}"
+        body_html = (
+            f"<p>{employee['full_name']} has requested {leave_type['name_en']} {dates_desc}.</p>"
+            f"<p>Reason: {safe_reason_for_email}</p>"
+            f"<p><a href='{approve_url}'>Approve</a> | <a href='{reject_url}'>Reject</a></p>"
+        )
         email_svc.send_email(
             to_email=manager["email"],
-            subject=f"Leave Approval Required: {employee['full_name']} — {leave_type['name_en']}",
-            body_html=(
-                f"<p>{prompt_text.replace(chr(10), '<br>')}</p>"
-            ),
-            body_plain=prompt_text,
+            subject=email_subject,
+            body_html=body_html,
+            body_plain=prompt_text + f"\n\nReply-Token: {outbound_message_id}",
+            message_id=outbound_message_id,
         )
 
         # Warn about medical certificate if sick leave > threshold
@@ -530,6 +709,12 @@ class SubmitLeaveRequestTool(Tool):
         cert_warning = ""
         if cert_after and days_requested and days_requested > cert_after:
             cert_warning = f" Note: a medical certificate will be required for sick leave exceeding {cert_after} days."
+
+        submission_message = (
+            f"Your {leave_type['name_en']} request has been submitted. "
+            f"An approval request has been sent to {manager['full_name']} ({manager['email']}). "
+            f"Request ID: {leave_request['id']}.{cert_warning}"
+        )
 
         return ToolResult(
             success=True,
@@ -542,11 +727,7 @@ class SubmitLeaveRequestTool(Tool):
                 "manager_name": manager["full_name"],
                 "manager_email": manager["email"],
                 "status": "pending_approval",
-                "message": (
-                    f"Your {leave_type['name_en']} request has been submitted. "
-                    f"An approval request has been sent to {manager['full_name']} ({manager['email']}). "
-                    f"Request ID: {leave_request['id']}.{cert_warning}"
-                ),
+                "message": submission_message,
             },
             data_fields_accessed=["employee_id", "manager_id", "leave_balance"],
             action_type="data_write",
@@ -593,6 +774,10 @@ class GetLeaveRequestsTool(Tool):
             employee_code = ctx.employee_code
         else:
             employee_code = input.get("employee_code")
+
+        decision = can_access(ctx, "read_leave_requests", {"employee_code": employee_code})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         employee = None
         employee_id = None
@@ -690,6 +875,14 @@ class ApproveLeaveRequestTool(Tool):
                     "type": "string",
                     "description": "Optional comment for the employee.",
                 },
+                "override_reason": {
+                    "type": "string",
+                    "description": (
+                        "Required only when the constraint engine returns requires_override "
+                        "(e.g. department cap or balance exceeded). Provide a business justification "
+                        "to proceed. Only hr_manager and admin roles may override."
+                    ),
+                },
             },
             "required": ["request_id"],
         },
@@ -714,12 +907,36 @@ class ApproveLeaveRequestTool(Tool):
                 error=f"Request cannot be approved — current status is '{lr['status']}'.",
             )
 
-        # Verify this manager is the assigned approver
         mgr_employee = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code)
-        if mgr_employee and lr.get("manager_db_id") and lr["manager_db_id"] != mgr_employee["id"]:
+        decision = can_access(ctx, "approve_leave", {
+            "assigned_manager_db_id": lr.get("manager_db_id"),
+            "caller_employee_db_id": mgr_employee["id"] if mgr_employee else None,
+        })
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
+
+        # Constraint engine: evaluate hard rules, soft thresholds, advisory flags
+        constraint = evaluate_constraints(
+            ctx, "approve_leave", lr, self._ds,
+            override_reason=input.get("override_reason"),
+        )
+        if constraint.verdict == "blocked":
+            return ToolResult(success=False, error=constraint.reason)
+        if constraint.verdict == "requires_override":
             return ToolResult(
                 success=False,
-                error="You are not the assigned approver for this request.",
+                error=constraint.reason,
+                data={"override_reason_required": True, "flags": constraint.flags},
+            )
+        # Write constraint event (policy_exception / advisory_shown) before state change
+        if constraint.event_type and lr.get("workflow_instance_id"):
+            self._ds.create_workflow_event(
+                ctx.tenant_id,
+                lr["workflow_instance_id"],
+                constraint.event_type,
+                mgr_employee["id"] if mgr_employee else None,
+                ctx.user_id,
+                constraint.event_data,
             )
 
         ok = self._ds.update_leave_request_status(
@@ -746,6 +963,16 @@ class ApproveLeaveRequestTool(Tool):
                     delta_pending=-float(lr["days_requested"]),
                     delta_used=+float(lr["days_requested"]),
                 )
+
+        # Sync workflow state: close pending_action + workflow_instance + write workflow_event
+        self._ds.sync_workflow_decision(
+            ctx.tenant_id,
+            request_id,
+            "approved",
+            mgr_employee["id"] if mgr_employee else None,
+            ctx.user_id,
+            input.get("comment"),
+        )
 
         # Notify employee
         employee = self._ds.get_employee_by_code(ctx.tenant_id, lr["employee_code"])
@@ -822,11 +1049,29 @@ class RejectLeaveRequestTool(Tool):
             )
 
         mgr_employee = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code)
-        if mgr_employee and lr.get("manager_db_id") and lr["manager_db_id"] != mgr_employee["id"]:
-            return ToolResult(
-                success=False,
-                error="You are not the assigned approver for this request.",
+        decision = can_access(ctx, "reject_leave", {
+            "assigned_manager_db_id": lr.get("manager_db_id"),
+            "caller_employee_db_id": mgr_employee["id"] if mgr_employee else None,
+        })
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
+
+        # Constraint engine: hard rules (sick+cert blocks rejection) and advisory flags
+        constraint = evaluate_constraints(ctx, "reject_leave", lr, self._ds)
+        if constraint.verdict == "blocked":
+            return ToolResult(success=False, error=constraint.reason)
+        # Write advisory event before state change (advisory verdict does not block)
+        advisory_flags: list[str] = []
+        if constraint.event_type and lr.get("workflow_instance_id"):
+            self._ds.create_workflow_event(
+                ctx.tenant_id,
+                lr["workflow_instance_id"],
+                constraint.event_type,
+                mgr_employee["id"] if mgr_employee else None,
+                ctx.user_id,
+                constraint.event_data,
             )
+            advisory_flags = constraint.flags
 
         ok = self._ds.update_leave_request_status(
             ctx.tenant_id,
@@ -856,6 +1101,16 @@ class RejectLeaveRequestTool(Tool):
                     delta_pending=-float(lr["days_requested"]),
                 )
 
+        # Sync workflow state: close pending_action + workflow_instance + write workflow_event
+        self._ds.sync_workflow_decision(
+            ctx.tenant_id,
+            request_id,
+            "rejected",
+            mgr_employee["id"] if mgr_employee else None,
+            ctx.user_id,
+            comment,
+        )
+
         # Notify employee
         employee = self._ds.get_employee_by_code(ctx.tenant_id, lr["employee_code"])
         if employee and employee.get("email"):
@@ -863,23 +1118,23 @@ class RejectLeaveRequestTool(Tool):
                 f"{lr['start_date']} to {lr['end_date']}"
                 if lr.get("start_date") else f"{lr.get('duration_hours')} hours"
             )
+            safe_comment = sanitize_for_html_email(comment)
             email_svc.send_email(
                 to_email=employee["email"],
                 subject=f"Leave Request Rejected — {lr['leave_type_name']}",
-                body_html=f"<p>Your {lr['leave_type_name']} request ({date_info}) was rejected. Reason: {comment}</p>",
+                body_html=f"<p>Your {lr['leave_type_name']} request ({date_info}) was rejected. Reason: {safe_comment}</p>",
                 body_plain=f"Your {lr['leave_type_name']} request ({date_info}) was rejected. Reason: {comment}",
             )
 
-        return ToolResult(
-            success=True,
-            data={
-                "request_id": request_id,
-                "new_status": "manager_rejected",
-                "employee_name": lr.get("employee_name"),
-                "message": f"Leave request for {lr.get('employee_name')} has been rejected. The employee has been notified.",
-            },
-            action_type="data_write",
-        )
+        result_data: dict = {
+            "request_id": request_id,
+            "new_status": "manager_rejected",
+            "employee_name": lr.get("employee_name"),
+            "message": f"Leave request for {lr.get('employee_name')} has been rejected. The employee has been notified.",
+        }
+        if advisory_flags:
+            result_data["advisory_flags"] = advisory_flags
+        return ToolResult(success=True, data=result_data, action_type="data_write")
 
 
 # ─── Tool 8: cancel_leave_request ────────────────────────────────────────────
@@ -916,9 +1171,9 @@ class CancelLeaveRequestTool(Tool):
         if not lr:
             return ToolResult(success=False, error=f"Leave request {request_id} not found.")
 
-        # Row-level check: employee can only cancel own requests
-        if ctx.role == "employee" and lr.get("employee_code") != ctx.employee_code:
-            return ToolResult(success=False, error="You can only cancel your own leave requests.")
+        decision = can_access(ctx, "cancel_leave", {"request_employee_code": lr.get("employee_code")})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
 
         if lr["status"] != "pending_approval":
             return ToolResult(

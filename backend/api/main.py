@@ -1,9 +1,11 @@
+import asyncio
 import logging
 import uuid as _uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
+from typing import Literal
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -55,7 +57,20 @@ async def lifespan(app: FastAPI):
     conn.close()
 
     _registry = build_registry(_data_source, audit_logger)
+
+    from services.email_listener import run_email_listener
+    _listener_task = asyncio.create_task(
+        run_email_listener(_data_source, _fotopia_tenant_id),
+        name="imap-email-listener",
+    )
+
     yield
+
+    _listener_task.cancel()
+    try:
+        await _listener_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="Fotopia HR Agent", version="0.1.0", lifespan=lifespan)
@@ -68,10 +83,23 @@ app.add_middleware(
 )
 
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    role: str
+    display_name: str
+    employee_code: str
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
-    # TESTING ONLY — remove before production. Allows switching identities without restarting Docker.
+    # TESTING ONLY — ignored when a valid JWT is present. Remove before production.
     demo_role: str | None = None
 
 
@@ -92,33 +120,108 @@ def health():
     return {"status": "ok", "tenant": config.TENANT_SLUG, "llm_provider": config.LLM_PROVIDER}
 
 
-def _build_context(role_override: str | None = None) -> ToolContext:
-    """Phase 1 stub. Phase 2: decode JWT, look up user in DB, populate from their record.
-    Switch identity via DEMO_ROLE env var or the demo_role request field (TESTING ONLY):
-      employee   → EMP001 Saif Ahmed Hassan
-      hr_manager → EMP002 Nourhan Hosny (default)
-    """
-    role = role_override if role_override in ("employee", "hr_manager") else config.DEMO_ROLE
-    if role == "employee":
-        return ToolContext(
-            tenant_id=_fotopia_tenant_id,
-            user_id="demo-employee",
-            role="employee",
-            employee_code="EMP001",
-            display_name="Saif Ahmed Hassan",
-        )
-    return ToolContext(
+@app.get("/api/me")
+def whoami(authorization: str | None = Header(default=None)):
+    """Return the authenticated caller's identity. Useful for testing auth without hitting the LLM."""
+    ctx = _build_context(authorization, None)
+    return {
+        "user_id": ctx.user_id,
+        "role": ctx.role,
+        "employee_code": ctx.employee_code,
+        "display_name": ctx.display_name,
+    }
+
+
+@app.post("/auth/login", response_model=LoginResponse)
+def login(body: LoginRequest):
+    """Issue a JWT for valid credentials. The token encodes role + identity."""
+    if _data_source is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    import psycopg2
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET app.current_tenant_id = %s", (_fotopia_tenant_id,))
+            cur.execute(
+                """
+                SELECT u.id, u.full_name, u.role, u.password_hash, e.employee_code
+                FROM users u
+                LEFT JOIN employees e ON e.id = u.employee_id
+                WHERE u.tenant_id = %s AND u.email = %s
+                """,
+                (_fotopia_tenant_id, body.email.lower().strip()),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    user_id, full_name, role, password_hash, employee_code = row
+
+    if not password_hash:
+        raise HTTPException(status_code=401, detail="Account not configured for password login")
+
+    from core.auth import AuthError, issue_jwt, verify_password
+    if not verify_password(body.password, password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = issue_jwt(
+        user_id=str(user_id),
+        role=role,
         tenant_id=_fotopia_tenant_id,
-        user_id="demo-user",
-        role="hr_manager",
-        employee_code="EMP002",
-        display_name="Nourhan Hosny",
+        employee_code=employee_code or "",
+        display_name=full_name,
+    )
+    return LoginResponse(
+        access_token=token,
+        token_type="bearer",
+        role=role,
+        display_name=full_name,
+        employee_code=employee_code or "",
     )
 
 
+def _build_context(authorization: str | None, demo_role_override: str | None) -> ToolContext:
+    """
+    Build ToolContext from JWT (primary) or demo_role fallback (DEBUG only).
+    JWT path: Authorization: Bearer <token> header — validated, tenant-checked.
+    Fallback: demo_role in request body, only when DEBUG_ALLOW_DEMO_ROLE=true.
+    """
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        from core.auth import AuthError, decode_context
+        try:
+            return decode_context(token, _fotopia_tenant_id)
+        except AuthError as exc:
+            raise HTTPException(status_code=401, detail=str(exc))
+
+    if config.DEBUG_ALLOW_DEMO_ROLE:
+        role = demo_role_override if demo_role_override in ("employee", "hr_manager") else config.DEMO_ROLE
+        if role == "employee":
+            return ToolContext(
+                tenant_id=_fotopia_tenant_id,
+                user_id="demo-employee",
+                role="employee",
+                employee_code="EMP001",
+                display_name="Saif Ahmed Hassan",
+            )
+        return ToolContext(
+            tenant_id=_fotopia_tenant_id,
+            user_id="demo-user",
+            role="hr_manager",
+            employee_code="EMP002",
+            display_name="Nourhan Hosny",
+        )
+
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
 @app.post("/chat", response_model=ChatResponse)
-def chat(body: ChatRequest):
-    ctx = _build_context(body.demo_role)
+def chat(body: ChatRequest, authorization: str | None = Header(default=None)):
+    ctx = _build_context(authorization, body.demo_role)
     session_id = body.session_id or str(_uuid.uuid4())
     prior_messages = _sessions.get(session_id, [])
 
@@ -133,6 +236,12 @@ def chat(body: ChatRequest):
     )
 
 
+# STEP 7 — EMAIL LISTENER HOOK
+# Phase 2: when the HR Manager inbox is connected, inbound email replies will
+# be parsed for the correlation_token embedded in the approve/reject URL and
+# routed here programmatically. The outbound_message_id in pending_actions
+# stores the SMTP Message-ID so In-Reply-To headers can also resolve the action.
+# No JWT required — correlation_token is the sole auth for this endpoint.
 @app.get("/api/leave/resolve/{correlation_token}", response_class=HTMLResponse)
 def resolve_leave_request(
     correlation_token: str,
@@ -203,6 +312,53 @@ def resolve_leave_request(
     )
 
 
+class SimulateInboundRequest(BaseModel):
+    from_email: str
+    in_reply_to: str | None = None
+    body_text: str
+
+
+@app.post("/api/email/simulate-inbound")
+def simulate_inbound_email(
+    body: SimulateInboundRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Simulate an inbound email reply for testing / demo.
+    Requires hr_manager or admin role. Calls the same process_inbound_email()
+    that the IMAP listener uses — one resolution path, not two.
+    """
+    if _data_source is None or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    ctx = _build_context(authorization, None)
+    if ctx.role not in ("hr_manager", "admin"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if "@" not in body.from_email:
+        raise HTTPException(status_code=422, detail="from_email must contain @")
+    if body.in_reply_to is not None and not (
+        body.in_reply_to.startswith("<") and body.in_reply_to.endswith(">")
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="in_reply_to must be angle-bracket-wrapped, e.g. <uuid@domain>",
+        )
+
+    from services.email_listener import process_inbound_email
+    result = process_inbound_email(
+        ds=_data_source,
+        tenant_id=_fotopia_tenant_id,
+        from_email=body.from_email,
+        in_reply_to=body.in_reply_to,
+        body_text=body.body_text,
+    )
+
+    if result.get("error") == "sender_not_authorised":
+        raise HTTPException(status_code=403, detail="Sender not authorised for this action")
+
+    return result
+
+
 @app.get("/api/leave/pending-count")
 def get_leave_pending_count():
     if not _fotopia_tenant_id:
@@ -211,6 +367,7 @@ def get_leave_pending_count():
     conn = psycopg2.connect(config.DATABASE_URL)
     try:
         with conn.cursor() as cur:
+            cur.execute("SET app.current_tenant_id = %s", (_fotopia_tenant_id,))
             cur.execute(
                 "SELECT COUNT(*) FROM leave_requests WHERE tenant_id = %s AND status = 'pending_approval'",
                 (_fotopia_tenant_id,),
@@ -221,6 +378,66 @@ def get_leave_pending_count():
         conn.close()
 
 
+class ApproveBody(BaseModel):
+    comment: str | None = None
+
+
+class RejectBody(BaseModel):
+    comment: str
+
+
+@app.get("/api/leave/pending-approvals-queue")
+def get_pending_approvals_queue(authorization: str | None = Header(default=None)):
+    """Return pending leave requests for the HR approval inbox UI."""
+    if not _fotopia_tenant_id or not _data_source:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    if ctx.role not in ("hr_staff", "hr_manager", "admin"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    items = _data_source.get_pending_approvals(_fotopia_tenant_id, ctx.employee_code)
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/leave/{request_id}/approve")
+def approve_leave_via_inbox(
+    request_id: str,
+    body: ApproveBody,
+    authorization: str | None = Header(default=None),
+):
+    """Approve a leave request from the UI inbox. Routes through ToolRegistry for audit."""
+    if not _registry or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    result = _registry.execute(
+        "approve_leave_request",
+        {"request_id": request_id, "comment": body.comment},
+        ctx,
+    )
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    return result.data
+
+
+@app.post("/api/leave/{request_id}/reject")
+def reject_leave_via_inbox(
+    request_id: str,
+    body: RejectBody,
+    authorization: str | None = Header(default=None),
+):
+    """Reject a leave request from the UI inbox. Routes through ToolRegistry for audit."""
+    if not _registry or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    result = _registry.execute(
+        "reject_leave_request",
+        {"request_id": request_id, "comment": body.comment},
+        ctx,
+    )
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    return result.data
+
+
 @app.get("/api/audit-log")
 def get_audit_log(limit: int = Query(default=15, ge=1, le=50)):
     if not _fotopia_tenant_id:
@@ -229,6 +446,7 @@ def get_audit_log(limit: int = Query(default=15, ge=1, le=50)):
     conn = psycopg2.connect(config.DATABASE_URL)
     try:
         with conn.cursor() as cur:
+            cur.execute("SET app.current_tenant_id = %s", (_fotopia_tenant_id,))
             cur.execute(
                 """
                 SELECT id, tool_name, actor_role, action, outcome,
@@ -249,6 +467,27 @@ def get_audit_log(limit: int = Query(default=15, ge=1, le=50)):
         return {"entries": rows}
     finally:
         conn.close()
+
+
+class AppropriatenessDecisionBody(BaseModel):
+    decision: Literal["proceeded", "cancelled"]
+
+
+@app.post("/api/appropriateness/{event_id}/decision")
+def record_appropriateness_decision(
+    event_id: str,
+    body: AppropriatenessDecisionBody,
+    authorization: str | None = Header(default=None),
+):
+    """Record whether the human proceeded or cancelled after an appropriateness flag."""
+    if not _data_source or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    # Whitelist event_id characters (UUID hex + hyphens)
+    if not all(c in "0123456789abcdefABCDEF-" for c in event_id):
+        raise HTTPException(status_code=400, detail="Invalid event ID")
+    _build_context(authorization, None)  # auth check — raises 401 if unauthenticated
+    _data_source.record_appropriateness_decision(_fotopia_tenant_id, event_id, body.decision)
+    return {"ok": True}
 
 
 @app.get("/documents/{doc_id}")

@@ -1,37 +1,47 @@
 import { useState } from 'react'
 import ChatInterface from './components/ChatInterface.jsx'
 import AuditLog from './components/AuditLog.jsx'
+import ApprovalInbox from './components/ApprovalInbox.jsx'
+import LoginPage from './components/LoginPage.jsx'
+import { getStoredUser, logout } from './api.js'
 
-const ROLES = {
-  employee: {
-    label: 'Employee',
-    name: 'Saif Ahmed Hassan',
-    initials: 'SA',
-    color: '#60a5fa',
-    bg: '#1e3a5f',
-    border: '#2d5086',
-  },
-  hr_manager: {
-    label: 'HR Manager',
-    name: 'Nourhan Hosny',
-    initials: 'NH',
-    color: '#c084fc',
-    bg: '#2d1a4e',
-    border: '#4a2878',
-  },
+const ROLE_STYLES = {
+  employee:   { label: 'Employee',   color: '#60a5fa', bg: '#1e3a5f', border: '#2d5086' },
+  hr_staff:   { label: 'HR Staff',   color: '#34d399', bg: '#0d2d22', border: '#1a5c3a' },
+  hr_manager: { label: 'HR Manager', color: '#c084fc', bg: '#2d1a4e', border: '#4a2878' },
+  admin:      { label: 'Admin',      color: '#f97316', bg: '#2d1500', border: '#7c3900' },
 }
 
-export default function App() {
-  const [demoRole, setDemoRole] = useState('employee')
-  const [resetKey, setResetKey] = useState(0)
+function getInitials(name) {
+  return (name || '').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
+}
 
-  function switchRole(role) {
-    if (role === demoRole) return
-    setDemoRole(role)
+const HR_ROLES = new Set(['hr_staff', 'hr_manager', 'admin'])
+
+export default function App() {
+  const [user, setUser] = useState(() => getStoredUser())
+  const [resetKey, setResetKey] = useState(0)
+  const [inboxVisible, setInboxVisible] = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
+
+  function handleLogin(userData) {
+    setUser(userData)
     setResetKey(k => k + 1)
   }
 
-  const role = ROLES[demoRole]
+  function handleLogout() {
+    logout()
+    setUser(null)
+    setResetKey(k => k + 1)
+    setInboxVisible(false)
+    setPendingCount(0)
+  }
+
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} />
+  }
+
+  const roleStyle = ROLE_STYLES[user.role] || ROLE_STYLES.employee
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f1117' }}>
@@ -71,80 +81,113 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center: role switcher */}
+        {/* Center: role badge */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
           <div style={{
-            display: 'inline-flex',
-            background: '#13151f',
-            border: '1px solid #1a1d2e',
-            borderRadius: '10px',
-            padding: '4px',
-            gap: '4px',
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: '#13151f', border: '1px solid #1a1d2e',
+            borderRadius: '10px', padding: '6px 16px',
           }}>
-            {Object.entries(ROLES).map(([key, r]) => {
-              const active = demoRole === key
-              return (
-                <button
-                  key={key}
-                  onClick={() => switchRole(key)}
-                  style={{
-                    padding: '6px 20px',
-                    borderRadius: '7px',
-                    border: active ? `1px solid ${r.border}` : '1px solid transparent',
-                    background: active ? r.bg : 'transparent',
-                    color: active ? r.color : '#555',
-                    fontSize: '13px',
-                    fontWeight: active ? 600 : 400,
-                    cursor: 'pointer',
-                    transition: 'all 0.18s',
-                    fontFamily: 'inherit',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {r.label}
-                </button>
-              )
-            })}
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: roleStyle.color, flexShrink: 0,
+            }} />
+            <span style={{ fontSize: '13px', color: roleStyle.color, fontWeight: 600 }}>
+              {roleStyle.label}
+            </span>
           </div>
         </div>
 
-        {/* Right: user avatar + name */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-          <div style={{
-            width: 34, height: 34,
-            borderRadius: '50%',
-            background: role.bg,
-            border: `1.5px solid ${role.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '12px', fontWeight: 700, color: role.color,
-            flexShrink: 0,
-          }}>
-            {role.initials}
-          </div>
-          <div>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: '#e8e8f0', lineHeight: '1.3', whiteSpace: 'nowrap' }}>
-              {role.name}
+        {/* Right: inbox toggle (HR only) + user avatar + logout */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          {HR_ROLES.has(user.role) && (
+            <button
+              onClick={() => setInboxVisible(v => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '5px 12px', borderRadius: 7,
+                background: inboxVisible ? '#2a1800' : 'transparent',
+                border: `1px solid ${inboxVisible ? '#92400e' : '#252b42'}`,
+                color: inboxVisible ? '#fbbf24' : '#6b7280',
+                fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'all 0.15s',
+              }}
+            >
+              Inbox
+              {pendingCount > 0 && (
+                <span style={{
+                  minWidth: 16, height: 16, borderRadius: 8,
+                  background: '#f59e0b', color: '#1a0e00',
+                  fontSize: 10, fontWeight: 700,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 4px',
+                }}>
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: 34, height: 34,
+              borderRadius: '50%',
+              background: roleStyle.bg,
+              border: `1.5px solid ${roleStyle.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '12px', fontWeight: 700, color: roleStyle.color,
+              flexShrink: 0,
+            }}>
+              {getInitials(user.display_name)}
             </div>
-            <div style={{ fontSize: '11px', color: role.color, lineHeight: '1.3', whiteSpace: 'nowrap' }}>
-              {role.label}
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#e8e8f0', lineHeight: '1.3', whiteSpace: 'nowrap' }}>
+                {user.display_name}
+              </div>
+              <div style={{ fontSize: '11px', color: roleStyle.color, lineHeight: '1.3', whiteSpace: 'nowrap' }}>
+                {roleStyle.label}
+              </div>
             </div>
           </div>
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: '5px 12px', borderRadius: 7,
+              background: 'transparent', border: '1px solid #252b42',
+              color: '#6b7280', fontSize: '12px', cursor: 'pointer',
+              fontFamily: 'inherit', transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { e.target.style.borderColor = '#374151'; e.target.style.color = '#9ca3af' }}
+            onMouseLeave={e => { e.target.style.borderColor = '#252b42'; e.target.style.color = '#6b7280' }}
+          >
+            Sign out
+          </button>
         </div>
 
       </header>
 
-      {/* ── Body: chat + audit log ──────────────────────────────────────── */}
+      {/* ── Body: chat + inbox/audit log ───────────────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
         {/* Chat panel (~60%) */}
         <div style={{ flex: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #1a1d2e' }}>
-          <ChatInterface key={resetKey} demoRole={demoRole} />
+          <ChatInterface key={resetKey} demoRole={user.role} onInboxToggle={HR_ROLES.has(user.role) ? () => setInboxVisible(v => !v) : undefined} />
         </div>
 
-        {/* Audit log panel (~40%) */}
-        <div style={{ flex: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 320 }}>
-          <AuditLog />
-        </div>
+        {/* Approval inbox (HR only, toggled) */}
+        {HR_ROLES.has(user.role) && inboxVisible && (
+          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 320 }}>
+            <ApprovalInbox visible={inboxVisible} onCountChange={setPendingCount} />
+          </div>
+        )}
+
+        {/* Audit log panel (~40%) — hidden when inbox is open */}
+        {!inboxVisible && (
+          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 320 }}>
+            <AuditLog />
+          </div>
+        )}
 
       </div>
     </div>

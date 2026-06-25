@@ -61,6 +61,15 @@ class DataSource(ABC):
         """Return pending_actions assigned to this approver, joined with leave request details."""
 
     @abstractmethod
+    def get_pending_action_by_outbound_message_id(
+        self, tenant_id: str, outbound_message_id: str
+    ) -> dict | None:
+        """Look up a pending_action by SMTP Message-ID stored at send time.
+        Returns dict with: id, correlation_token, status, assigned_to_email,
+        assigned_to_employee_id, deadline_at, workflow_instance_id.
+        Returns None if not found."""
+
+    @abstractmethod
     def get_leave_type_by_code(self, tenant_id: str, code: str) -> dict | None:
         """Return a single active leave_type row by code, including is_time_based and requires_hr_review."""
 
@@ -179,3 +188,61 @@ class DataSource(ABC):
         """Update leave_requests.status and optional metadata fields.
         metadata keys (all optional): manager_comment, manager_decision_at,
         hr_comment, hr_decision_at, hr_reviewer_id, resolved_by_id, rejection_reason."""
+
+    # ─── Workflow events ───────────────────────────────────────────────────────
+
+    @abstractmethod
+    def create_workflow_event(
+        self,
+        tenant_id: str,
+        workflow_instance_id: str | None,
+        event_type: str,
+        actor_employee_id: str | None,
+        actor_user_id: str | None,
+        data: dict,
+    ) -> dict:
+        """Insert a workflow_events row and return it.
+        event_type: 'submitted' | 'pending_approval_sent' | 'manager_approved'
+                  | 'manager_rejected' | 'top_of_hierarchy_approved'
+                  | 'cancelled' | 'completed' | 'timed_out'"""
+
+    @abstractmethod
+    def sync_workflow_decision(
+        self,
+        tenant_id: str,
+        leave_request_id: str,
+        decision: str,
+        actor_employee_id: str | None,
+        actor_user_id: str | None,
+        resolution_note: str | None,
+    ) -> bool:
+        """Atomically close the active pending_action + workflow_instance for a leave request
+        after a tool-based approve/reject, and write a workflow_events row.
+        decision: 'approved' | 'rejected'
+        Returns True if a pending_action was found and updated, False if no active action existed."""
+
+    @abstractmethod
+    def get_tenant_settings(self, tenant_id: str) -> dict:
+        """Return tenants.settings JSONB for the given tenant, or {} if not found."""
+
+    @abstractmethod
+    def count_active_leaves_in_department(
+        self,
+        tenant_id: str,
+        department: str,
+        start_date: str,
+        end_date: str,
+        exclude_request_id: str | None = None,
+    ) -> dict:
+        """Return {"active_count": int, "total_employees": int} for the department
+        during the date range. active_count excludes exclude_request_id if provided."""
+
+    @abstractmethod
+    def record_appropriateness_decision(
+        self,
+        tenant_id: str,
+        event_id: str,
+        decision: str,
+    ) -> None:
+        """Set workflow_events.data.human_decision for the given event.
+        decision: 'proceeded' | 'cancelled'"""

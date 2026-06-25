@@ -52,7 +52,8 @@ class ToolRegistry:
 
         # Security layer 4: every execution is logged regardless of outcome
         latency_ms = int((time.monotonic() - start) * 1000)
-        self._audit.log(ctx, tool_name, tool_input, result, authz_decision, latency_ms)
+        final_authz = result.authz_note or authz_decision
+        self._audit.log(ctx, tool_name, tool_input, result, final_authz, latency_ms)
         return result
 
 
@@ -77,6 +78,7 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         CancelLeaveRequestTool,
         CheckLeaveBalanceTool,
         CheckLeaveEligibilityTool,
+        CheckRequestCompletenessTool,
         GetLeaveRequestsTool,
         GetLeaveWaitingStatusTool,
         GetPendingApprovalsTool,
@@ -97,7 +99,8 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         GenerateSalaryCertificateTool(data_source),
         GenerateTwimcLetterTool(data_source),
         GenerateExperienceCertificateTool(data_source),
-        # Leave / OOO tools (9 tools)
+        # Leave / OOO tools (10 tools)
+        CheckRequestCompletenessTool(data_source),
         CheckLeaveBalanceTool(data_source),
         CheckLeaveEligibilityTool(data_source),
         SubmitLeaveRequestTool(data_source),
