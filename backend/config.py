@@ -76,3 +76,33 @@ EMAIL_LISTENER_POLL_INTERVAL_SECONDS: int = int(
 
 # Domain used in outgoing Message-ID header: <{pending_action_uuid}@EMAIL_MESSAGE_ID_DOMAIN>
 EMAIL_MESSAGE_ID_DOMAIN: str = os.getenv("EMAIL_MESSAGE_ID_DOMAIN", "hr.fotopia.com")
+
+# ── Leave calendar ────────────────────────────────────────────────────────────
+# Egypt's official public holidays for 2026.
+# Islamic holidays (Eid, Islamic New Year, Prophet's Birthday) are lunar-based
+# and shift each year; dates below are approximate from Islamic calendar conversion.
+# Update annually from: Official Egyptian Gazette / Prime Minister's decrees.
+# Egypt weekend: Friday + Saturday (weekday indices 4 and 5 in Python's date.weekday()).
+EGYPT_PUBLIC_HOLIDAYS_2026: list[str] = [
+    # Fixed civil holidays
+    "2026-01-01",  # New Year's Day
+    "2026-01-07",  # Coptic Christmas
+    "2026-01-25",  # 25 January Revolution Day
+    "2026-04-25",  # Sinai Liberation Day
+    "2026-05-01",  # Labour Day
+    "2026-07-23",  # Revolution Day
+    "2026-10-06",  # Armed Forces Day
+    # Islamic holidays (approximate — lunar calendar, confirm from official gazette)
+    "2026-03-19",  # Eid al-Fitr Day 1
+    "2026-03-20",  # Eid al-Fitr Day 2
+    "2026-03-21",  # Eid al-Fitr Day 3
+    "2026-05-26",  # Eid al-Adha Day 1
+    "2026-05-27",  # Eid al-Adha Day 2
+    "2026-05-28",  # Eid al-Adha Day 3
+    "2026-05-29",  # Eid al-Adha Day 4
+    "2026-06-17",  # Islamic New Year (1448H)
+    "2026-08-26",  # Prophet's Birthday
+]
+# Weekend day indices in Python's date.weekday() (Monday=0 ... Sunday=6).
+# Egypt standard: Friday=4, Saturday=5.
+EGYPT_WEEKEND_DAYS: list[int] = [4, 5]

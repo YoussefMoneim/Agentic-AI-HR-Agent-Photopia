@@ -246,3 +246,45 @@ class DataSource(ABC):
     ) -> None:
         """Set workflow_events.data.human_decision for the given event.
         decision: 'proceeded' | 'cancelled'"""
+
+    @abstractmethod
+    def count_leave_type_usage(
+        self, tenant_id: str, employee_id: str, leave_type_code: str
+    ) -> int:
+        """Count non-rejected, non-cancelled leave requests for this employee and leave type.
+        Used to enforce max_times_in_career (e.g. marriage=1, hajj=1, maternity=3).
+        Counts statuses: pending_approval, pending_top_of_hierarchy, manager_approved,
+        hr_approved, completed. Excludes: manager_rejected, hr_rejected, cancelled, withdrawn."""
+
+    @abstractmethod
+    def get_employee_age(self, tenant_id: str, employee_id: str) -> int | None:
+        """Return employee age in full years calculated from birth_date.
+        Returns None if birth_date is NULL. Used for age ≥50 → 30-day annual leave advisory."""
+
+    @abstractmethod
+    def add_compensatory_day(
+        self,
+        tenant_id: str,
+        employee_id: str,
+        holiday_date: str,
+        approved_by_employee_id: str,
+    ) -> dict:
+        """Credit 1 day to the employee's annual leave balance as compensatory off for working
+        on a public holiday or weekend. holiday_date is an ISO date string of the day worked.
+        approved_by_employee_id is the UUID of the manager who pre-approved the work.
+        Returns {success, new_allocated_days, leave_balance_id}."""
+
+    # ─── RAG / policy search ───────────────────────────────────────────────────
+
+    @abstractmethod
+    def search_policy(
+        self,
+        tenant_id: str,
+        query: str,
+        caller_roles: list[str],
+        limit: int = 5,
+    ) -> list[dict]:
+        """Full-text search over private_document_chunks.
+        Pre-filters allowed_roles && caller_roles BEFORE text search — never post-filter.
+        classified_at IS NOT NULL guard ensures quarantine chunks are never returned.
+        Returns list of {document_id, chunk_index, content, source_file, sensitivity}."""

@@ -1,4 +1,23 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Application role: non-superuser so RLS FORCE policies actually apply.
+-- Superusers bypass RLS even with FORCE; fotopia_app is exempt from that exemption.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fotopia_app') THEN
+        CREATE ROLE fotopia_app LOGIN PASSWORD 'fotopia_app';
+    END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO fotopia_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO fotopia_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO fotopia_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO fotopia_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO fotopia_app;
 
 -- One row per customer company. Everything else is scoped to a tenant_id.
 CREATE TABLE tenants (
@@ -34,6 +53,7 @@ CREATE TABLE employees (
     department TEXT,
     employment_type TEXT,
     start_date DATE,
+    birth_date DATE,          -- used for age ≥50 → 30-day annual leave allocation advisory
     basic_salary NUMERIC(12,2),
     housing_allowance NUMERIC(12,2) DEFAULT 0,
     transport_allowance NUMERIC(12,2) DEFAULT 0,
@@ -68,8 +88,11 @@ CREATE TABLE audit_log (
 );
 
 -- ─── Leave types ──────────────────────────────────────────────────────────────
--- 8 supported types: annual, sick, emergency, permission, business_trip,
---                    wfh, outside_duty, compensatory  (+ unpaid legacy)
+-- 19 types: annual, sick, emergency, permission, business_trip, wfh,
+--           outside_duty, compensatory, unpaid (legacy),
+--           marriage, hajj, umrah, military_summon, educational,
+--           funeral (inactive — use degree-split types below), maternity, paternity,
+--           funeral_1st_degree, funeral_2nd_degree  (WIN policy HR/BTE 001/7-2025)
 CREATE TABLE leave_types (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id),
@@ -78,11 +101,13 @@ CREATE TABLE leave_types (
     name_ar TEXT,
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
     requires_documentation BOOLEAN NOT NULL DEFAULT FALSE,
-    deducts_balance BOOLEAN NOT NULL DEFAULT TRUE,      -- FALSE: emergency, permission, business_trip, wfh, outside_duty
+    deducts_balance BOOLEAN NOT NULL DEFAULT TRUE,      -- FALSE: emergency, permission, business_trip, wfh, outside_duty, occasion types
     is_time_based BOOLEAN NOT NULL DEFAULT FALSE,       -- TRUE only for Permission (hours, not days)
-    requires_hr_review BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE: annual, sick, emergency, business_trip, compensatory, unpaid
-    max_days_per_year INTEGER,    -- NULL = no annual cap
-    max_consecutive_days INTEGER, -- NULL = no per-request limit
+    requires_hr_review BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE: annual, sick, emergency, business_trip, compensatory, unpaid, marriage, hajj, umrah, military_summon, funeral, maternity
+    max_days_per_year INTEGER,          -- NULL = no annual cap
+    max_consecutive_days INTEGER,       -- NULL = no per-request limit
+    max_times_in_career INTEGER,        -- NULL = no career cap (marriage=1, hajj=1, umrah=1, maternity=3, paternity=3)
+    service_min_days INTEGER NOT NULL DEFAULT 0,  -- minimum employment days before eligible (marriage/umrah=365, hajj=1825)
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     UNIQUE (tenant_id, code)
 );
@@ -100,6 +125,8 @@ CREATE TABLE leave_balances (
     used_days NUMERIC(5,1) NOT NULL DEFAULT 0,        -- approved and completed requests
     pending_days NUMERIC(5,1) NOT NULL DEFAULT 0,     -- in-flight: submitted but not yet resolved
     carry_over_days NUMERIC(5,1) NOT NULL DEFAULT 0,
+    carry_over_expiry_date DATE,                       -- carry-over expires March 31 of the balance year (Q1 only)
+    casual_used_days NUMERIC(5,1) NOT NULL DEFAULT 0, -- annual leave casual sub-quota (max 7 of 21 days, max 2 consecutive)
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, employee_id, leave_type_id, year)
 );
@@ -125,6 +152,7 @@ CREATE TABLE leave_requests (
     reason TEXT,
     attachment_path TEXT,              -- path to uploaded medical cert, etc.
     has_medical_certificate BOOLEAN NOT NULL DEFAULT FALSE,
+    is_casual BOOLEAN NOT NULL DEFAULT FALSE,  -- annual leave: casual (≤2 consecutive days) vs regular
 
     -- Approval chain — manager stored at submission from DB, never from user input
     manager_id UUID REFERENCES employees(id),
@@ -320,5 +348,50 @@ CREATE POLICY tenant_isolation ON workflow_events FOR ALL
 ALTER TABLE audit_log         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log         FORCE  ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON audit_log FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+-- ─── RAG knowledge base ─────────────────────────────────────────────────────
+
+-- Tier 1: public knowledge chunks (labour law, public references)
+-- No tenant, no ACL — shared across all tenants.
+CREATE TABLE IF NOT EXISTS public_knowledge_chunks (
+    id          BIGSERIAL PRIMARY KEY,
+    source      TEXT NOT NULL,
+    chunk_index INT NOT NULL,
+    content     TEXT NOT NULL,
+    embedding   vector(1536),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS public_knowledge_chunks_embedding_idx
+    ON public_knowledge_chunks USING hnsw (embedding vector_cosine_ops);
+
+-- Tier 2/3: private document chunks (tenant-scoped, ACL-enforced)
+-- classified_at is nullable: NULL = quarantine; ingestion sets to now() at classification time.
+-- content_tsv is auto-computed from content for full-text search.
+CREATE TABLE IF NOT EXISTS private_document_chunks (
+    id              BIGSERIAL PRIMARY KEY,
+    tenant_id       UUID NOT NULL REFERENCES tenants(id),
+    document_id     TEXT NOT NULL,
+    chunk_index     INT NOT NULL,
+    content         TEXT NOT NULL,
+    embedding       vector(1536),
+    sensitivity     TEXT NOT NULL DEFAULT 'public_tenant',
+    allowed_roles   TEXT[] NOT NULL DEFAULT '{}',
+    source_file     TEXT NOT NULL,
+    classified_at   TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    content_tsv     tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
+);
+CREATE INDEX IF NOT EXISTS private_document_chunks_embedding_idx
+    ON private_document_chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS private_document_chunks_tenant_idx
+    ON private_document_chunks(tenant_id, sensitivity);
+CREATE INDEX IF NOT EXISTS private_document_chunks_tsv_idx
+    ON private_document_chunks USING GIN (content_tsv);
+
+ALTER TABLE private_document_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE private_document_chunks FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON private_document_chunks FOR ALL
     USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
     WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);

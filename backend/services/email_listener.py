@@ -326,6 +326,18 @@ def _process_imap_message(
     _, from_addr = email.utils.parseaddr(from_raw)
     from_email = from_addr.strip().lower()
 
+    # Self-email guard: never process emails sent by our own SMTP address.
+    # In demo mode the system sends to itself; without this guard the listener
+    # would process every outbound approval notification as if it were a reply.
+    own_address = config.SMTP_FROM_ADDRESS.strip().lower()
+    if own_address and from_email == own_address:
+        _log.debug(
+            "IMAP: skipping self-sent message %s (from=%s matches SMTP_FROM_ADDRESS)",
+            msg_id, from_email,
+        )
+        imap.store(msg_id, "+FLAGS", "\\Seen")
+        return
+
     in_reply_to = msg.get("In-Reply-To", "").strip() or None
     body_text = _extract_body(msg)
 

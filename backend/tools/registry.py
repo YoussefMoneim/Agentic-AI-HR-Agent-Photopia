@@ -74,6 +74,7 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         SearchEmployeesTool,
     )
     from tools.leave import (
+        AddCompensatoryDayTool,
         ApproveLeaveRequestTool,
         CancelLeaveRequestTool,
         CheckLeaveBalanceTool,
@@ -85,9 +86,10 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         RejectLeaveRequestTool,
         SubmitLeaveRequestTool,
     )
+    from tools.policy import SearchPolicyTool
 
     tools: list[Tool] = [
-        # Existing employee tools
+        # Employee read tools (7)
         SearchEmployeesTool(data_source),
         ListEmployeesTool(data_source),
         GetEmployeeDataTool(data_source),
@@ -95,11 +97,11 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         GetEmployeeSummaryTool(data_source),
         GetEmployeeDocumentsTool(data_source),
         CalculateEndOfServiceTool(data_source),
-        # Document generation tools
+        # Document generation tools (3)
         GenerateSalaryCertificateTool(data_source),
         GenerateTwimcLetterTool(data_source),
         GenerateExperienceCertificateTool(data_source),
-        # Leave / OOO tools (10 tools)
+        # Leave / OOO tools (11)
         CheckRequestCompletenessTool(data_source),
         CheckLeaveBalanceTool(data_source),
         CheckLeaveEligibilityTool(data_source),
@@ -110,5 +112,8 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         RejectLeaveRequestTool(data_source),
         CancelLeaveRequestTool(data_source),
         GetLeaveWaitingStatusTool(data_source),
+        AddCompensatoryDayTool(data_source),
+        # Policy search / RAG (1)
+        SearchPolicyTool(data_source),
     ]
     return ToolRegistry(tools, audit_logger)

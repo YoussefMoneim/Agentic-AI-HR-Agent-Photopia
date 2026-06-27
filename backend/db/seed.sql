@@ -18,7 +18,7 @@ SELECT
     'EGP', emp.annual_leave_balance, emp.email, emp.manager_name
 FROM fotopia, (VALUES
     ('EMP001', 'Saif Ahmed Hassan',  'سيف أحمد حسن',    'Software Engineer',  'R&D',  'Full-time', '2022-03-15', 20000, 2500, 1500, 24000, 8,  'saif.hassan@fotopia.ai',    'Dr. Ahmed El-Yazbi'),
-    ('EMP002', 'Nourhan Hosny',      'نورهان حسني',      'HR Project Lead',    'HR',   'Full-time', '2021-06-01', 24000, 3000, 2000, 29000, 12, 'nourhan.hosny@fotopia.ai',  'Raef Eid'),
+    ('EMP002', 'Nourhan Hosny',      'نورهان حسني',      'HR Project Lead',    'HR',   'Full-time', '2021-06-01', 24000, 3000, 2000, 29000, 12, 'hr.agent.fotopia@gmail.com',  'Raef Eid'),
     ('EMP003', 'Omar Alsayed',       'عمر السيد',        'ML Engineer',        'R&D',  'Full-time', '2023-01-10', 21500, 2500, 2000, 26000, 5,  'omar.alsayed@fotopia.ai',   'Dr. Ahmed El-Yazbi')
 ) AS emp(employee_code, full_name, arabic_name, position, department, employment_type, start_date, basic_salary, housing_allowance, transport_allowance, total_salary, annual_leave_balance, email, manager_name);
 
@@ -154,6 +154,88 @@ INSERT INTO leave_policies (tenant_id, leave_type_id, probation_restriction_days
 SELECT t.id, lt.id, 90
 FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id AND lt.code = 'unpaid'
 WHERE t.slug = 'fotopia';
+
+-- ─── WIN Holding leave types (migration 010 + 011) ──────────────────────────
+-- These cover the full HR/BTE 001/7-2025 leave type set beyond the base 9.
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'marriage', 'Marriage Leave', 'إجازة زواج', TRUE, FALSE, FALSE, FALSE, TRUE, 5, 5, 1, 365
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'hajj', 'Hajj Leave', 'إجازة حج', TRUE, FALSE, FALSE, FALSE, TRUE, 30, 30, 1, 1825
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'umrah', 'Umrah Leave', 'إجازة عمرة', TRUE, FALSE, FALSE, FALSE, TRUE, 5, 5, 1, 365
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_times_in_career, service_min_days)
+SELECT id, 'military_summon', 'Military Service Summon', 'إجازة التجنيد', TRUE, TRUE, FALSE, FALSE, TRUE, NULL, 0
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_times_in_career, service_min_days)
+SELECT id, 'educational', 'Educational Exam Leave', 'إجازة الامتحانات', TRUE, TRUE, FALSE, FALSE, FALSE, NULL, 0
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+-- funeral (generic — inserted then immediately deactivated; degree-split types below are the active ones)
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'funeral', 'Funeral Leave', 'إجازة الوفاة', TRUE, FALSE, FALSE, FALSE, TRUE, 3, NULL, 0
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+UPDATE leave_types SET is_active = FALSE
+FROM tenants WHERE tenants.id = leave_types.tenant_id AND tenants.slug = 'fotopia' AND leave_types.code = 'funeral';
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'maternity', 'Maternity Leave', 'إجازة الأمومة', TRUE, FALSE, FALSE, FALSE, TRUE, 120, 120, 3, 365
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'paternity', 'Paternity Leave', 'إجازة الأبوة', TRUE, FALSE, FALSE, FALSE, FALSE, 1, 1, 3, 0
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+-- funeral_1st_degree: Father/Mother/Son/Daughter/Husband/Wife — 3 working days
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'funeral_1st_degree', 'Funeral Leave (1st Degree)', 'إجازة وفاة (درجة أولى)', TRUE, FALSE, FALSE, FALSE, TRUE, 3, 3, NULL, 0
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+-- funeral_2nd_degree: Grandfather/Grandmother/Brother/Sister/Grandsons — 1 working day
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'funeral_2nd_degree', 'Funeral Leave (2nd Degree)', 'إجازة وفاة (درجة ثانية)', TRUE, FALSE, FALSE, FALSE, TRUE, 1, 1, NULL, 0
+FROM tenants WHERE slug = 'fotopia' ON CONFLICT (tenant_id, code) DO NOTHING;
+
+-- Leave policies for all new types (all defaults; constraints enforced in application code)
+INSERT INTO leave_policies (tenant_id, leave_type_id)
+SELECT t.id, lt.id
+FROM tenants t JOIN leave_types lt ON lt.tenant_id = t.id
+    AND lt.code IN ('marriage', 'hajj', 'umrah', 'military_summon', 'educational',
+                    'funeral', 'maternity', 'paternity', 'funeral_1st_degree', 'funeral_2nd_degree')
+WHERE t.slug = 'fotopia' ON CONFLICT (tenant_id, leave_type_id) DO NOTHING;
+
+-- Reset annual leave min_notice to 0 — split notice logic (1-day/<7-working-days) is in application code
+UPDATE leave_policies lp SET min_notice_days = 0
+FROM leave_types lt, tenants t
+WHERE lp.leave_type_id = lt.id AND lt.tenant_id = t.id AND t.slug = 'fotopia' AND lt.code = 'annual';
+
+-- Seed carry_over_expiry_date for annual leave balances (Q1 — March 31 of the balance year)
+UPDATE leave_balances lb SET carry_over_expiry_date = make_date(lb.year, 3, 31)
+FROM leave_types lt, tenants t
+WHERE lb.leave_type_id = lt.id AND lb.tenant_id = t.id AND t.slug = 'fotopia'
+  AND lt.code = 'annual' AND lb.carry_over_expiry_date IS NULL;
+
+-- ─── Tenant settings (migrations 004 + 005) ──────────────────────────────────
+UPDATE tenants
+SET settings = jsonb_build_object(
+    'approval_routing', jsonb_build_object(
+        'top_of_hierarchy_action', 'self_approve_flagged',
+        'default_deadline_hours', 72
+    ),
+    'constraints', jsonb_build_object(
+        'max_concurrent_leave_pct', 0.25,
+        'allow_balance_override_roles', ARRAY['hr_manager', 'admin']
+    )
+)
+WHERE slug = 'fotopia';
 
 -- ─── Demo users (login credentials for testing / demo) ───────────────────────
 -- All demo accounts share password 'demo123' (bcrypt hash). Never ship to production.

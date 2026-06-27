@@ -18,6 +18,8 @@ import sys
 # Add backend root to sys.path so imports resolve when running from the container
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import unittest.mock
+
 import psycopg2
 import pytest
 
@@ -56,6 +58,16 @@ def _cleanup(database_url: str, tenant_id: str) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 # Session-scoped fixtures (created once per test run)
 # ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_send_email_globally():
+    """Prevent the test suite from sending real emails via SMTP.
+    Tests that need to assert on email calls (test_email_correlation.py) patch
+    send_email locally with unittest.mock.patch — those local patches take precedence
+    over this session-level fixture and continue to work correctly."""
+    with unittest.mock.patch("services.email.send_email", return_value=True):
+        yield
+
 
 @pytest.fixture(scope="session")
 def database_url() -> str:

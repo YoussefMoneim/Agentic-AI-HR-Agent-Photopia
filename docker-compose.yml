@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_DB: fotopia_hr
       POSTGRES_USER: fotopia
@@ -28,7 +28,9 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./backend/documents:/app/documents
+        - ./backend/documents:/app/documents
+        - ./backend/policies:/app/policies
+        - ./backend/scripts:/app/scripts
 
 volumes:
   postgres_data:

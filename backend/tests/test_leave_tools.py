@@ -632,9 +632,10 @@ class TestEdgeCases:
         assert result.data["days_requested"] == 1.0
 
     def test_very_long_leave_blocked_by_balance(self, ctx, ds):
-        """Requesting 100 annual days (balance = 21) is blocked by eligibility check inside submit."""
+        """Requesting 100 annual days (balance = 21) is blocked by eligibility check inside submit.
+        Start date must be >7 working days away (annual leave notice rule) so the balance check fires."""
         result = SubmitLeaveRequestTool(ds).execute(
-            {"leave_type_code": "annual", "start_date": "2026-07-01", "end_date": "2026-10-08"},
+            {"leave_type_code": "annual", "start_date": "2026-09-01", "end_date": "2026-12-09"},
             ctx(),
         )
         assert not result.success

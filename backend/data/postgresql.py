@@ -457,8 +457,8 @@ class PostgreSQLDataSource(DataSource):
                             (tenant_id, employee_id, leave_type_id,
                              start_date, end_date, days_requested,
                              start_datetime, end_datetime, duration_hours,
-                             reason, attachment_path, manager_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             reason, attachment_path, manager_id, is_casual)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id, status, submitted_at
                         """,
                         (
@@ -468,7 +468,7 @@ class PostgreSQLDataSource(DataSource):
                             data.get("start_datetime"), data.get("end_datetime"),
                             data.get("duration_hours"),
                             data.get("reason"), data.get("attachment_path"),
-                            manager_id,
+                            manager_id, bool(data.get("is_casual", False)),
                         ),
                     )
                     row = cur.fetchone()
@@ -802,7 +802,8 @@ class PostgreSQLDataSource(DataSource):
                     """
                     SELECT id, code, name_en, name_ar, requires_approval,
                            requires_documentation, deducts_balance, is_time_based,
-                           requires_hr_review, max_days_per_year, max_consecutive_days
+                           requires_hr_review, max_days_per_year, max_consecutive_days,
+                           max_times_in_career, service_min_days
                     FROM leave_types
                     WHERE tenant_id = %s AND code = %s AND is_active = TRUE
                     """,
@@ -814,6 +815,96 @@ class PostgreSQLDataSource(DataSource):
                 r = dict(row)
                 r["id"] = str(r["id"])
                 return r
+        finally:
+            self._release(conn)
+
+    def get_employee_age(self, tenant_id: str, employee_id: str) -> int | None:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT EXTRACT(YEAR FROM AGE(CURRENT_DATE, birth_date))::INTEGER
+                    FROM employees
+                    WHERE tenant_id = %s AND id = %s::uuid AND birth_date IS NOT NULL
+                    """,
+                    (tenant_id, employee_id),
+                )
+                row = cur.fetchone()
+                return int(row[0]) if row else None
+        finally:
+            self._release(conn)
+
+    def add_compensatory_day(
+        self,
+        tenant_id: str,
+        employee_id: str,
+        holiday_date: str,
+        approved_by_employee_id: str,
+    ) -> dict:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Resolve annual leave_type id
+                    cur.execute(
+                        "SELECT id FROM leave_types WHERE tenant_id = %s AND code = 'annual' AND is_active = TRUE",
+                        (tenant_id,),
+                    )
+                    lt_row = cur.fetchone()
+                    if lt_row is None:
+                        return {"success": False, "error": "Annual leave type not found"}
+                    leave_type_id = lt_row["id"]
+
+                    year = int(holiday_date[:4])
+                    cur.execute(
+                        """
+                        UPDATE leave_balances
+                        SET allocated_days = allocated_days + 1, updated_at = now()
+                        WHERE tenant_id = %s
+                          AND employee_id = %s::uuid
+                          AND leave_type_id = %s
+                          AND year = %s
+                        RETURNING id, allocated_days
+                        """,
+                        (tenant_id, employee_id, leave_type_id, year),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        return {"success": False, "error": "Annual leave balance row not found for this employee"}
+                    return {
+                        "success": True,
+                        "new_allocated_days": _float(row["allocated_days"]),
+                        "leave_balance_id": str(row["id"]),
+                    }
+        finally:
+            self._release(conn)
+
+    def count_leave_type_usage(
+        self, tenant_id: str, employee_id: str, leave_type_code: str
+    ) -> int:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM leave_requests lr
+                    JOIN leave_types lt ON lt.id = lr.leave_type_id
+                    WHERE lr.tenant_id = %s
+                      AND lr.employee_id = %s::uuid
+                      AND lt.code = %s
+                      AND lr.status NOT IN (
+                          'manager_rejected', 'hr_rejected', 'cancelled', 'withdrawn'
+                      )
+                    """,
+                    (tenant_id, employee_id, leave_type_code),
+                )
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
         finally:
             self._release(conn)
 
@@ -1346,5 +1437,44 @@ class PostgreSQLDataSource(DataSource):
                         """,
                         (decision, event_id, tenant_id),
                     )
+        finally:
+            self._release(conn)
+
+    # ─── RAG / policy search ───────────────────────────────────────────────────
+
+    def search_policy(
+        self,
+        tenant_id: str,
+        query: str,
+        caller_roles: list[str],
+        limit: int = 5,
+    ) -> list[dict]:
+        # plainto_tsquery uses AND between all terms — a synonym not in the text
+        # causes the whole query to miss. Instead, stem the query with to_tsvector
+        # (which handles stop-word removal and stemming) and join the resulting
+        # lexemes with OR (|) so any matching term is a hit.
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    WITH q AS (
+                        SELECT string_agg(lexeme, ' | ') AS or_query
+                        FROM unnest(to_tsvector('english', %s))
+                    )
+                    SELECT document_id, chunk_index, content, source_file, sensitivity
+                    FROM private_document_chunks, q
+                    WHERE q.or_query IS NOT NULL
+                      AND tenant_id = %s
+                      AND classified_at IS NOT NULL
+                      AND allowed_roles && %s::text[]
+                      AND content_tsv @@ to_tsquery('english', q.or_query)
+                    ORDER BY ts_rank(content_tsv, to_tsquery('english', q.or_query)) DESC
+                    LIMIT %s
+                    """,
+                    (query, tenant_id, caller_roles, limit),
+                )
+                return [dict(r) for r in cur.fetchall()]
         finally:
             self._release(conn)

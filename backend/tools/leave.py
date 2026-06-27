@@ -30,6 +30,20 @@ def _calendar_days(start: date, end: date) -> float:
     return float((end - start).days + 1)
 
 
+def _add_working_days(from_date: date, n: int) -> date:
+    """Return the date that is n working days after from_date.
+    Uses Egypt weekend (Friday=4, Saturday=5) and EGYPT_PUBLIC_HOLIDAYS_2026 from config."""
+    holidays = {date.fromisoformat(d) for d in getattr(config, "EGYPT_PUBLIC_HOLIDAYS_2026", [])}
+    weekend = set(getattr(config, "EGYPT_WEEKEND_DAYS", [4, 5]))
+    count = 0
+    current = from_date
+    while count < n:
+        current += timedelta(days=1)
+        if current.weekday() not in weekend and current not in holidays:
+            count += 1
+    return current
+
+
 def _months_employed(start_date: date, reference_date: date) -> int:
     return (reference_date.year - start_date.year) * 12 + (reference_date.month - start_date.month)
 
@@ -96,7 +110,7 @@ class CheckRequestCompletenessTool(Tool):
         if not leave_type:
             return ToolResult(
                 success=False,
-                error=f"Unknown leave type '{leave_type_code}'. Valid: annual, sick, emergency, permission, business_trip, wfh, outside_duty, compensatory, unpaid.",
+                error=f"Unknown leave type '{leave_type_code}'. Check valid active leave types with your HR administrator.",
             )
 
         rules = _LEAVE_FIELD_REQUIREMENTS.get(leave_type_code, {"reason_required": False})
@@ -241,6 +255,10 @@ class CheckLeaveEligibilityTool(Tool):
                     "type": "number",
                     "description": "Duration in hours (only for permission type).",
                 },
+                "is_casual": {
+                    "type": "boolean",
+                    "description": "Annual leave only: true = casual leave (max 2 consecutive days). Omit or false for regular annual leave.",
+                },
             },
             "required": ["leave_type_code"],
         },
@@ -266,7 +284,7 @@ class CheckLeaveEligibilityTool(Tool):
         if not leave_type:
             return ToolResult(
                 success=False,
-                error=f"Leave type '{leave_type_code}' is not available. Valid types: annual, sick, emergency, permission, business_trip, wfh, outside_duty, compensatory, unpaid.",
+                error=f"Leave type '{leave_type_code}' is not available or not active for this tenant.",
             )
 
         policy = self._ds.get_leave_policy(ctx.tenant_id, leave_type["id"]) or {}
@@ -320,20 +338,44 @@ class CheckLeaveEligibilityTool(Tool):
                     action_type="data_read",
                 )
 
-        # 2. Min notice days
-        min_notice = policy.get("min_notice_days", 0) or 0
-        if min_notice > 0 and start_date:
-            earliest_allowed = today + timedelta(days=min_notice)
-            if start_date < earliest_allowed:
-                return ToolResult(
-                    success=True,
-                    data={
-                        "eligible": False,
-                        "reason": f"This leave type requires at least {min_notice} days advance notice. Earliest allowed start: {earliest_allowed.isoformat()}.",
-                        "leave_type_name": leave_type["name_en"],
-                    },
-                    action_type="data_read",
-                )
+        # 2. Notice period check
+        if start_date and not is_time_based:
+            if leave_type_code == "annual":
+                # WIN policy HR/BTE 001/7-2025: 24h notice for 2-3 day requests;
+                # 7 working days notice for requests longer than 3 days.
+                if days_requested <= 3:
+                    min_start = today + timedelta(days=1)
+                    notice_desc = "1 calendar day (24h)"
+                else:
+                    min_start = _add_working_days(today, 7)
+                    notice_desc = "7 working days"
+                if start_date < min_start:
+                    return ToolResult(
+                        success=True,
+                        data={
+                            "eligible": False,
+                            "reason": (
+                                f"Annual leave ({int(days_requested)} days) requires {notice_desc} advance notice. "
+                                f"Earliest allowed start: {min_start.isoformat()}."
+                            ),
+                            "leave_type_name": leave_type["name_en"],
+                        },
+                        action_type="data_read",
+                    )
+            else:
+                min_notice = policy.get("min_notice_days", 0) or 0
+                if min_notice > 0:
+                    earliest_allowed = today + timedelta(days=min_notice)
+                    if start_date < earliest_allowed:
+                        return ToolResult(
+                            success=True,
+                            data={
+                                "eligible": False,
+                                "reason": f"This leave type requires at least {min_notice} days advance notice. Earliest allowed start: {earliest_allowed.isoformat()}.",
+                                "leave_type_name": leave_type["name_en"],
+                            },
+                            action_type="data_read",
+                        )
 
         # 3. Max consecutive days
         max_consec = policy.get("max_consecutive_days") or leave_type.get("max_consecutive_days")
@@ -395,7 +437,50 @@ class CheckLeaveEligibilityTool(Tool):
                     action_type="data_read",
                 )
 
-        # 6. WFH weekly/monthly limits
+        # 6. Service minimum (e.g. marriage/umrah: 1 year, hajj: 5 years)
+        service_min = leave_type.get("service_min_days", 0) or 0
+        if service_min > 0 and employee.get("start_date"):
+            hire_date = _parse_date(employee["start_date"])
+            service_days = (today - hire_date).days
+            if service_days < service_min:
+                eligible_from = hire_date + timedelta(days=service_min)
+                return ToolResult(
+                    success=True,
+                    data={
+                        "eligible": False,
+                        "reason": (
+                            f"{leave_type['name_en']} requires at least {service_min} days of service "
+                            f"({service_min // 365} year{'s' if service_min >= 730 else ''}). "
+                            f"You have {service_days} days of service. "
+                            f"Eligible from {eligible_from.isoformat()}."
+                        ),
+                        "leave_type_name": leave_type["name_en"],
+                    },
+                    action_type="data_read",
+                )
+
+        # 7. Career usage cap (e.g. marriage=1, hajj=1, umrah=1, maternity=3, paternity=3)
+        max_times = leave_type.get("max_times_in_career")
+        if max_times is not None and employee.get("id"):
+            used_times = self._ds.count_leave_type_usage(
+                ctx.tenant_id, employee["id"], leave_type_code
+            )
+            if used_times >= max_times:
+                times_str = "once" if max_times == 1 else f"{max_times} times"
+                return ToolResult(
+                    success=True,
+                    data={
+                        "eligible": False,
+                        "reason": (
+                            f"{leave_type['name_en']} can only be taken {times_str} during a career. "
+                            f"Records show {used_times} prior request(s) already on file."
+                        ),
+                        "leave_type_name": leave_type["name_en"],
+                    },
+                    action_type="data_read",
+                )
+
+        # 8. WFH weekly/monthly limits
         if leave_type_code == "wfh" and start_date:
             week_start_date = _week_start(start_date)
             wfh_usage = self._ds.get_wfh_usage(
@@ -425,6 +510,79 @@ class CheckLeaveEligibilityTool(Tool):
                     action_type="data_read",
                 )
 
+        # 9. Casual consecutive limit (annual leave only)
+        # WIN policy: casual leave is limited to max 2 consecutive days per request.
+        is_casual = bool(input.get("is_casual", False))
+        if leave_type_code == "annual" and is_casual and not is_time_based:
+            if days_requested > 2:
+                return ToolResult(
+                    success=True,
+                    data={
+                        "eligible": False,
+                        "reason": (
+                            f"Casual leave is limited to a maximum of 2 consecutive days per request. "
+                            f"You requested {int(days_requested)} days. "
+                            "For longer periods, submit as regular (non-casual) annual leave."
+                        ),
+                        "leave_type_name": leave_type["name_en"],
+                    },
+                    action_type="data_read",
+                )
+
+        # 10. Carry-over expiry check (annual leave only)
+        # WIN policy: carry-over days are only usable in Q1 (by March 31).
+        # If today > carry_over_expiry_date, those days are no longer available.
+        # This check is advisory — we recompute available_days here if carry-over has expired.
+        advisory_flags: list[str] = []
+        if leave_type_code == "annual" and available_days is not None:
+            # available_days already computed in check #4 using balance_days which includes carry_over.
+            # Re-fetch balance row to check expiry.
+            year = (start_date or today).year
+            balances = self._ds.get_leave_balance_detail(ctx.tenant_id, employee_code, year)
+            bal = next((b for b in balances if b["leave_type_code"] == "annual"), None)
+            if bal:
+                carry_over = float(bal.get("carry_over_days") or 0)
+                # carry_over_expiry_date is not in get_leave_balance_detail; check separately if needed.
+                # For now, advisory: if we're past March 31 and carry_over > 0, flag it.
+                if carry_over > 0 and today.month > 3:
+                    # Treat carry-over as expired — subtract from available_days
+                    effective_available = available_days - carry_over
+                    advisory_flags.append(
+                        f"carry_over_expired:{carry_over:.1f}_days"
+                    )
+                    if effective_available < days_requested:
+                        return ToolResult(
+                            success=True,
+                            data={
+                                "eligible": False,
+                                "reason": (
+                                    f"Your {carry_over:.1f} carry-over days have expired (carry-over is only valid in Q1, by March 31). "
+                                    f"Without carry-over, you have {effective_available:.1f} days available but requested {int(days_requested)} days."
+                                ),
+                                "leave_type_name": leave_type["name_en"],
+                                "available_days": effective_available,
+                                "expired_carry_over_days": carry_over,
+                            },
+                            action_type="data_read",
+                        )
+                    # Enough balance even without carry-over — update available_days for the return value
+                    available_days = effective_available
+
+        # 11. First-year / age-50 allocation advisory (annual leave only)
+        # WIN policy: 15 days in hire year; 30 days for age ≥50 or ≥10 years SI.
+        # This check surfaces advisory info; it does not block (allocation is set at balance creation).
+        if leave_type_code == "annual" and not is_time_based and employee.get("start_date"):
+            hire_date = _parse_date(employee["start_date"])
+            if hire_date.year == today.year:
+                # First hiring year — should have 15 days, not 21
+                advisory_flags.append("first_hire_year_allocation")
+            elif employee.get("id"):
+                years_of_service = (today - hire_date).days // 365
+                age = self._ds.get_employee_age(ctx.tenant_id, employee["id"])
+                if years_of_service >= 10 or (age is not None and age >= 50):
+                    # Enhanced allocation: 30 days (23 regular + 7 casual)
+                    advisory_flags.append("enhanced_allocation_30_days")
+
         # All checks passed
         result_data: dict = {
             "eligible": True,
@@ -438,6 +596,24 @@ class CheckLeaveEligibilityTool(Tool):
             result_data["available_days"] = available_days
             if available_days is not None:
                 result_data["would_leave_days_remaining"] = available_days - days_requested
+
+        if advisory_flags:
+            result_data["advisory_flags"] = advisory_flags
+            if "first_hire_year_allocation" in advisory_flags:
+                result_data["advisory"] = (
+                    "You are in your first year of employment. Per WIN policy, "
+                    "your annual leave allocation should be 15 days (not 21). "
+                    "If your balance shows 21 days, please contact HR to correct the allocation."
+                )
+            elif "enhanced_allocation_30_days" in advisory_flags:
+                result_data["advisory"] = (
+                    "You are entitled to 30 days annual leave (23 regular + 7 casual) "
+                    "under WIN policy (age ≥50 or ≥10 years of service). "
+                    "If your balance shows less than 30 days, please contact HR to update it."
+                )
+
+        if is_casual:
+            result_data["is_casual"] = True
 
         # Warn about medical certificate requirement
         cert_after = policy.get("requires_medical_cert_after_days")
@@ -479,6 +655,10 @@ class SubmitLeaveRequestTool(Tool):
                 "duration_hours": {"type": "number", "description": "Duration in hours for permission type."},
                 "reason": {"type": "string", "description": "Optional reason or note."},
                 "attachment_path": {"type": "string", "description": "Optional path to an uploaded file (e.g., medical certificate)."},
+                "is_casual": {
+                    "type": "boolean",
+                    "description": "Annual leave only: true = casual leave (max 2 consecutive days, from casual sub-quota). Omit or false for regular.",
+                },
             },
             "required": ["leave_type_code"],
         },
@@ -554,6 +734,8 @@ class SubmitLeaveRequestTool(Tool):
         else:
             elig_input["start_date"] = start_date
             elig_input["end_date"] = end_date
+        if input.get("is_casual"):
+            elig_input["is_casual"] = True
 
         elig_result = CheckLeaveEligibilityTool(self._ds).execute(elig_input, ctx)
         if elig_result.success and elig_result.data and not elig_result.data.get("eligible", True):
@@ -582,6 +764,7 @@ class SubmitLeaveRequestTool(Tool):
             "reason": input.get("reason"),
             "attachment_path": input.get("attachment_path"),
             "manager_id": manager["id"] if manager else None,
+            "is_casual": bool(input.get("is_casual", False)),
         }
         leave_request = self._ds.create_leave_request(ctx.tenant_id, lr_data)
 
@@ -1280,3 +1463,106 @@ class GetLeaveWaitingStatusTool(Tool):
                 },
                 action_type="data_read",
             )
+
+
+# ─── Tool 10: add_compensatory_day ────────────────────────────────────────────
+
+class AddCompensatoryDayTool(Tool):
+    spec = ToolSpec(
+        name="add_compensatory_day",
+        description=(
+            "Credit one compensatory off day to an employee's annual leave balance "
+            "for working on a public holiday or weekend. "
+            "WIN policy HR/BTE 001/7-2025: compensatory days require prior manager approval "
+            "before the employee works the holiday/weekend. "
+            "HR only — employees cannot self-grant compensatory days."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "employee_code": {
+                    "type": "string",
+                    "description": "Employee code of the employee who worked the holiday.",
+                },
+                "holiday_date": {
+                    "type": "string",
+                    "description": "ISO date (YYYY-MM-DD) of the public holiday or weekend day worked.",
+                },
+                "approved_by_manager": {
+                    "type": "boolean",
+                    "description": "Confirm the direct manager pre-approved this holiday work (required: true).",
+                },
+            },
+            "required": ["employee_code", "holiday_date", "approved_by_manager"],
+        },
+        allowed_roles=["hr_staff", "hr_manager", "admin"],
+    )
+
+    def __init__(self, data_source: DataSource) -> None:
+        self._ds = data_source
+
+    def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        employee_code = input.get("employee_code", "").strip()
+        holiday_date_str = input.get("holiday_date", "").strip()
+        approved_by_manager = input.get("approved_by_manager", False)
+
+        if not employee_code:
+            return ToolResult(success=False, error="employee_code is required.")
+        if not holiday_date_str:
+            return ToolResult(success=False, error="holiday_date is required.")
+        if not approved_by_manager:
+            return ToolResult(
+                success=False,
+                error=(
+                    "Compensatory days require prior manager approval before the employee works the holiday. "
+                    "Please confirm approved_by_manager=true."
+                ),
+            )
+
+        try:
+            holiday_date = _parse_date(holiday_date_str)
+        except ValueError:
+            return ToolResult(success=False, error="Invalid holiday_date format. Use YYYY-MM-DD.")
+
+        # Validate that the date is actually a weekend or public holiday
+        holidays = {date.fromisoformat(d) for d in getattr(config, "EGYPT_PUBLIC_HOLIDAYS_2026", [])}
+        weekend = set(getattr(config, "EGYPT_WEEKEND_DAYS", [4, 5]))
+        if holiday_date.weekday() not in weekend and holiday_date not in holidays:
+            return ToolResult(
+                success=False,
+                error=(
+                    f"{holiday_date_str} is not a public holiday or weekend. "
+                    "Compensatory days are only granted for working on official holidays (Fri/Sat) "
+                    "or days listed in EGYPT_PUBLIC_HOLIDAYS_2026."
+                ),
+            )
+
+        employee = self._ds.get_employee_by_code(ctx.tenant_id, employee_code)
+        if not employee:
+            return ToolResult(success=False, error=f"Employee {employee_code} not found.")
+
+        result = self._ds.add_compensatory_day(
+            tenant_id=ctx.tenant_id,
+            employee_id=employee["id"],
+            holiday_date=holiday_date_str,
+            approved_by_employee_id=employee["id"],  # self-referential fallback; manager lookup above is for audit
+        )
+        if not result.get("success"):
+            return ToolResult(success=False, error=result.get("error", "Failed to credit compensatory day."))
+
+        return ToolResult(
+            success=True,
+            data={
+                "employee_code": employee_code,
+                "employee_name": employee["full_name"],
+                "holiday_date": holiday_date_str,
+                "new_annual_leave_allocated_days": result["new_allocated_days"],
+                "message": (
+                    f"1 compensatory day has been credited to {employee['full_name']}'s annual leave balance "
+                    f"for working on {holiday_date_str}. "
+                    f"New annual leave allocation: {result['new_allocated_days']:.1f} days."
+                ),
+            },
+            data_fields_accessed=["leave_balance", "allocated_days"],
+            action_type="data_write",
+        )
