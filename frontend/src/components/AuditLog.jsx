@@ -30,6 +30,8 @@ const TOOL_LABEL = {
   generate_salary_certificate:     'generated salary certificate',
   generate_twimc_letter:           'generated TWIMC letter',
   generate_experience_certificate: 'generated experience certificate',
+  appropriateness_check:           'raised sensitivity flag',
+  share_decision:                  'recorded share decision',
 }
 
 const ROLE_STYLE = {

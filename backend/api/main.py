@@ -1,11 +1,14 @@
 import asyncio
+import io
+import json
 import logging
 import uuid as _uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-
-from fastapi import FastAPI, Header, HTTPException, Query
 from typing import Literal
+
+import psycopg2
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -132,13 +135,51 @@ def whoami(authorization: str | None = Header(default=None)):
     }
 
 
+@app.get("/api/employees")
+def list_employees_for_ui(authorization: str | None = Header(default=None)):
+    """Return employees visible to the caller for the people-picker UI."""
+    ctx = _build_context(authorization, None)
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE fotopia_app")
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            if ctx.role == "employee":
+                cur.execute(
+                    """
+                    SELECT e.employee_code, e.full_name, COALESCE(u.role, 'employee'),
+                           e.department, e.position
+                    FROM employees e
+                    LEFT JOIN users u ON u.employee_id = e.id AND u.tenant_id = e.tenant_id
+                    WHERE e.tenant_id = %s::uuid AND e.employee_code = %s
+                    """,
+                    (ctx.tenant_id, ctx.employee_code),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT e.employee_code, e.full_name, COALESCE(u.role, 'employee'),
+                           e.department, e.position
+                    FROM employees e
+                    LEFT JOIN users u ON u.employee_id = e.id AND u.tenant_id = e.tenant_id
+                    WHERE e.tenant_id = %s::uuid
+                    ORDER BY e.full_name
+                    """,
+                    (ctx.tenant_id,),
+                )
+            cols = ["employee_code", "full_name", "role", "department", "position"]
+            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        return {"employees": rows}
+    finally:
+        conn.close()
+
+
 @app.post("/auth/login", response_model=LoginResponse)
 def login(body: LoginRequest):
     """Issue a JWT for valid credentials. The token encodes role + identity."""
     if _data_source is None:
         raise HTTPException(status_code=503, detail="Service not ready")
 
-    import psycopg2
     conn = psycopg2.connect(config.DATABASE_URL)
     try:
         with conn.cursor() as cur:
@@ -485,9 +526,383 @@ def record_appropriateness_decision(
     # Whitelist event_id characters (UUID hex + hyphens)
     if not all(c in "0123456789abcdefABCDEF-" for c in event_id):
         raise HTTPException(status_code=400, detail="Invalid event ID")
-    _build_context(authorization, None)  # auth check — raises 401 if unauthenticated
+    ctx = _build_context(authorization, None)
     _data_source.record_appropriateness_decision(_fotopia_tenant_id, event_id, body.decision)
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE fotopia_app")
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            cur.execute(
+                """
+                INSERT INTO audit_log (tenant_id, actor_user_id, actor_role, tool_name,
+                    tool_input, outcome, authz_decision, result_summary, latency_ms, action)
+                VALUES (%s, %s, %s, 'share_decision', %s, 'success', 'allowed', %s, 0, 'data_write')
+                """,
+                (
+                    ctx.tenant_id, ctx.user_id, ctx.role,
+                    json.dumps({"event_id": event_id, "decision": body.decision}),
+                    f"Share decision: {body.decision}",
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
     return {"ok": True}
+
+
+def _extract_text_from_upload(filename: str, raw_bytes: bytes) -> str:
+    """Extract plain text from PDF, DOCX, or TXT. Falls back to raw UTF-8 decode."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    try:
+        if ext == "pdf":
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw_bytes))
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
+        if ext in ("docx", "doc"):
+            import docx
+            doc = docx.Document(io.BytesIO(raw_bytes))
+            return "\n".join(p.text for p in doc.paragraphs)
+    except Exception:
+        pass
+    return raw_bytes.decode("utf-8", errors="replace")
+
+
+class PasteDocRequest(BaseModel):
+    content: str
+    filename: str = "pasted-text.txt"
+
+
+def _scan_and_store_demo_doc(
+    ctx,
+    filename: str,
+    content_text: str,
+    file_size_bytes: int,
+) -> dict:
+    """Shared logic: scan content, store in demo_documents, return result."""
+    from workflow.appropriateness import scan_content_for_sensitivity, verify_sensitivity_with_llm, extract_surrounding_context
+
+    scan = scan_content_for_sensitivity(content_text)
+    is_sensitive = bool(scan)
+
+    # LLM verification on first match per type
+    enriched_scan: dict = {}
+    for stype, examples in scan.items():
+        entry: dict = {"examples": examples}
+        if examples and _llm is not None:
+            context = extract_surrounding_context(content_text, examples[0])
+            verdict = verify_sensitivity_with_llm(stype, context, _llm)
+            entry["llm_verdict"] = verdict
+            if not verdict.get("is_sensitive", True):
+                entry["confirmed_false_positive"] = True
+        enriched_scan[stype] = entry
+
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE fotopia_app")
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            cur.execute(
+                """
+                INSERT INTO demo_documents
+                    (tenant_id, uploaded_by, filename, content_text,
+                     file_size_bytes, sensitivity_scan, is_sensitive)
+                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    ctx.tenant_id, ctx.user_id, filename, content_text,
+                    file_size_bytes, json.dumps(enriched_scan), is_sensitive,
+                ),
+            )
+            doc_id, created_at = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "id": str(doc_id),
+        "filename": filename,
+        "is_sensitive": is_sensitive,
+        "sensitivity_types": list(scan.keys()),
+        "sensitivity_scan": enriched_scan,
+        "created_at": created_at.isoformat(),
+    }
+
+
+@app.post("/api/documents/upload-demo")
+async def upload_demo_document(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    """Upload a file (PDF/DOCX/TXT), scan its content for sensitivity."""
+    if not _data_source or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    raw = await file.read()
+    content_text = _extract_text_from_upload(file.filename or "upload.txt", raw)
+    return _scan_and_store_demo_doc(ctx, file.filename or "upload.txt", content_text, len(raw))
+
+
+@app.post("/api/documents/paste-demo")
+def paste_demo_document(
+    body: PasteDocRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Accept pasted plain text, scan for sensitivity — no file upload needed."""
+    if not _data_source or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    return _scan_and_store_demo_doc(ctx, body.filename, body.content, len(body.content.encode()))
+
+
+@app.get("/api/documents/demo")
+def get_demo_documents(authorization: str | None = Header(default=None)):
+    """Return demo documents for this tenant (employees see only their own)."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE fotopia_app")
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            if ctx.role == "employee":
+                cur.execute(
+                    """
+                    SELECT id, filename, is_sensitive, sensitivity_scan,
+                           uploaded_by, created_at
+                    FROM demo_documents
+                    WHERE tenant_id = %s AND uploaded_by = %s
+                    ORDER BY created_at DESC LIMIT 50
+                    """,
+                    (ctx.tenant_id, ctx.user_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, filename, is_sensitive, sensitivity_scan,
+                           uploaded_by, created_at
+                    FROM demo_documents
+                    WHERE tenant_id = %s
+                    ORDER BY created_at DESC LIMIT 50
+                    """,
+                    (ctx.tenant_id,),
+                )
+            cols = ["id", "filename", "is_sensitive", "sensitivity_scan", "uploaded_by", "created_at"]
+            rows = []
+            for row in cur.fetchall():
+                r = dict(zip(cols, row))
+                r["id"] = str(r["id"])
+                r["created_at"] = r["created_at"].isoformat() if r["created_at"] else None
+                rows.append(r)
+        return {"documents": rows}
+    finally:
+        conn.close()
+
+
+class CheckShareRequest(BaseModel):
+    recipient_role: str | None = None
+    recipient_employee_code: str | None = None
+    recipient_name: str | None = None
+
+
+@app.post("/api/documents/demo/{doc_id}/check-share")
+def check_demo_document_share(
+    doc_id: str,
+    body: CheckShareRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Check whether sharing a demo document with recipient_role is appropriate."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    if not all(c in "0123456789abcdefABCDEF-" for c in doc_id):
+        raise HTTPException(status_code=400, detail="Invalid document ID")
+    ctx = _build_context(authorization, None)
+
+    from workflow.appropriateness import check_share_mismatch
+
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE fotopia_app")
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            cur.execute(
+                "SELECT content_text, filename FROM demo_documents WHERE id = %s::uuid AND tenant_id = %s::uuid",
+                (doc_id, ctx.tenant_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        content_text, filename = row
+
+        # Resolve recipient_role from employee_code if provided
+        recipient_role = body.recipient_role
+        recipient_name = body.recipient_name
+        if body.recipient_employee_code:
+            with conn.cursor() as cur:
+                cur.execute("SET ROLE fotopia_app")
+                cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+                cur.execute(
+                    """
+                    SELECT u.role, e.full_name FROM users u
+                    JOIN employees e ON e.id = u.employee_id AND e.tenant_id = u.tenant_id
+                    WHERE u.tenant_id = %s::uuid AND e.employee_code = %s
+                    LIMIT 1
+                    """,
+                    (ctx.tenant_id, body.recipient_employee_code),
+                )
+                emp_row = cur.fetchone()
+            if emp_row:
+                recipient_role = emp_row[0]
+                recipient_name = recipient_name or emp_row[1]
+
+        decision = check_share_mismatch(
+            content=content_text,
+            recipient_role=recipient_role,
+            sharer_role=ctx.role,
+            document_title=filename,
+            llm_provider=_llm,
+        )
+
+        if not decision.flagged:
+            return {"flagged": False, "message": "No restrictions — safe to share"}
+
+        # Write workflow_events row so the human decision can be recorded later
+        event_id = str(_uuid.uuid4())
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE fotopia_app")
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            cur.execute(
+                """
+                INSERT INTO workflow_events
+                    (id, tenant_id, event_type, actor_user_id, data)
+                VALUES (%s::uuid, %s::uuid, 'appropriateness_flag', %s, %s)
+                """,
+                (
+                    event_id, ctx.tenant_id, ctx.user_id,
+                    json.dumps({
+                        "flag_code": decision.flag_code,
+                        "reason": decision.reason,
+                        "severity": decision.severity,
+                        "doc_id": doc_id,
+                        "recipient_role": recipient_role,
+                        "recipient_name": recipient_name,
+                        "human_decision": None,
+                    }),
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO audit_log (tenant_id, actor_user_id, actor_role, tool_name,
+                    tool_input, outcome, authz_decision, result_summary, latency_ms, action)
+                VALUES (%s, %s, %s, 'appropriateness_check', %s, 'success', 'allowed', %s, 0, 'data_read')
+                """,
+                (
+                    ctx.tenant_id, ctx.user_id, ctx.role,
+                    json.dumps({"doc_id": doc_id, "recipient_role": recipient_role, "recipient_name": recipient_name}),
+                    f"Sensitivity flag: {decision.flag_code} — {decision.reason[:120]}",
+                ),
+            )
+        conn.commit()
+        return {
+            "flagged": True,
+            "flag_code": decision.flag_code,
+            "severity": decision.severity,
+            "reason": decision.reason,
+            "event_id": event_id,
+        }
+    finally:
+        conn.close()
+
+
+@app.delete("/api/documents/demo/reset")
+def reset_demo_documents(authorization: str | None = Header(default=None)):
+    """Clear all demo documents for this tenant (hr_manager/admin only)."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    if ctx.role not in ("hr_manager", "admin"):
+        raise HTTPException(status_code=403, detail="hr_manager or admin role required")
+
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET ROLE fotopia_app")
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            cur.execute(
+                "DELETE FROM demo_documents WHERE tenant_id = %s RETURNING id",
+                (ctx.tenant_id,),
+            )
+            deleted_count = cur.rowcount
+            cur.execute(
+                """
+                DELETE FROM workflow_events
+                WHERE tenant_id = %s AND event_type = 'appropriateness_flag'
+                """,
+                (ctx.tenant_id,),
+            )
+        conn.commit()
+        return {"deleted_count": deleted_count, "message": "Demo reset complete"}
+    finally:
+        conn.close()
+
+
+@app.get("/api/documents/recent")
+def get_recent_documents(authorization: str | None = Header(default=None)):
+    """Return recently generated system documents from audit_log."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+
+    doc_tools = (
+        "generate_salary_certificate",
+        "generate_twimc_letter",
+        "generate_experience_certificate",
+    )
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
+            if ctx.role == "employee":
+                cur.execute(
+                    """
+                    SELECT tool_name, tool_input, result_summary, actor_role, created_at
+                    FROM audit_log
+                    WHERE tenant_id = %s
+                      AND tool_name = ANY(%s)
+                      AND outcome = 'success'
+                      AND tool_input->>'employee_code' = %s
+                    ORDER BY created_at DESC LIMIT 20
+                    """,
+                    (ctx.tenant_id, list(doc_tools), ctx.employee_code),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT tool_name, tool_input, result_summary, actor_role, created_at
+                    FROM audit_log
+                    WHERE tenant_id = %s
+                      AND tool_name = ANY(%s)
+                      AND outcome = 'success'
+                    ORDER BY created_at DESC LIMIT 20
+                    """,
+                    (ctx.tenant_id, list(doc_tools)),
+                )
+            rows = []
+            for tool_name, tool_input, result_summary, actor_role, created_at in cur.fetchall():
+                doc_type = tool_name.replace("generate_", "")
+                emp_code = (tool_input or {}).get("employee_code", "")
+                rows.append({
+                    "doc_type": doc_type,
+                    "employee_code": emp_code,
+                    "result_summary": result_summary,
+                    "generated_by_role": actor_role,
+                    "created_at": created_at.isoformat() if created_at else None,
+                })
+        return {"documents": rows}
+    finally:
+        conn.close()
 
 
 @app.get("/documents/{doc_id}")

@@ -1,24 +1,33 @@
 """
-Appropriateness layer — permission ≠ appropriateness.
+Appropriateness Layer — Permission ≠ Appropriateness
 
-Steps 0–5 enforce *can* (access gates) and *should* (constraint engine).
-This module adds a third check: *is this appropriate* even when technically
-permitted and within policy. Detection is deterministic — sensitivity
-classification + role rules, never LLM judgment.
+SCENARIOS COVERED BY THIS MODULE:
+  A. New document upload — scan before ingestion (check_share_mismatch)
+  B. Existing document explicit share — scan before sharing (check_share_mismatch)
+  C. Silent folder access audit — periodic review (SensitivityAuditTool)
+  E. Agent-generated document — scan before delivery (existing check_appropriateness)
+  J. External recipient — always flag sensitive content (recipient_role=None)
 
-The agent NEVER blocks on appropriateness grounds. check_appropriateness()
-returns a flag; the caller surfaces it alongside the normal result. Both the
-flag and the human's decision ("proceeded" / "cancelled") are recorded in
-workflow_events for the audit trail.
+SCENARIOS HANDLED ELSEWHERE (do not duplicate):
+  D. Search returns unexpected content — handled by RAG ACL pre-filter in search_policy SQL
+  G. Role change after access — handled by RLS checking current role on every query
+  I. Cross-tenant access — handled by RLS tenant_isolation policy on all tables
+
+SCENARIOS DEFERRED TO PHASE 3:
+  F. Content changes after classification — requires document versioning system
+  H. Bulk share aggregation — requires group membership analysis at share time
 """
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from data.base import DataSource
+    from llm.base import LLMProvider
     from tools.base import ToolContext
 
 # Sensitivity classification for the three document types that exist today.
@@ -190,3 +199,232 @@ def record_appropriateness_decision(
     Updates workflow_events.data.human_decision for the audit trail.
     """
     ds.record_appropriateness_decision(tenant_id, workflow_event_id, decision)
+
+
+# ── Content scanner and share mismatch detector (Component 1) ─────────────────
+
+# Sensitive content patterns — deterministic regex, not LLM
+SENSITIVITY_PATTERNS: dict[str, list[str]] = {
+    "salary": [
+        r"\bbasic[\s_-]?salary\b",
+        r"\bEGP\s*[\d,]+\b",
+        r"\bmonthly[\s_-]?salary\b",
+        r"\bhousing[\s_-]?allowance\b",
+        r"\btransport[\s_-]?allowance\b",
+        r"\btotal[\s_-]?salary\b",
+        r"\bcompensation[\s_-]?package\b",
+        r"\bpayslip\b",
+        r"\bpayroll\b",
+        r"\bnet[\s_-]?pay\b",
+    ],
+    "national_id": [
+        r"\b\d{14}\b",
+        r"\bnational[\s_-]?id\b",
+        r"\bnational[\s_-]?number\b",
+        r"\bid[\s_-]?number\b",
+    ],
+    "medical": [
+        r"\bdiagnosis\b",
+        r"\bmedical[\s_-]?report\b",
+        r"\bprescription\b",
+        r"\bdisease\b",
+        r"\btreatment\b",
+        r"\bhospital\b",
+        r"\bsick[\s_-]?certificate\b",
+    ],
+    "performance": [
+        r"\bperformance[\s_-]?review\b",
+        r"\bdisciplinary\b",
+        r"\bwarning[\s_-]?letter\b",
+        r"\btermination\b",
+        r"\bpip\b",
+    ],
+    "financial": [
+        r"\bbank[\s_-]?account\b",
+        r"\biban\b",
+        r"\bswift[\s_-]?code\b",
+        r"\bbudget\b",
+        r"\bfinancial[\s_-]?forecast\b",
+        r"\brevenue\b",
+        r"\bprofit[\s_-]?loss\b",
+    ],
+}
+
+# Which roles may see each sensitivity type
+SENSITIVITY_ROLE_REQUIREMENTS: dict[str, frozenset[str]] = {
+    "salary":      frozenset({"hr_manager", "admin", "finance"}),
+    "national_id": frozenset({"hr_manager", "admin"}),
+    "medical":     frozenset({"hr_manager", "admin"}),
+    "performance": frozenset({"hr_manager", "admin"}),
+    "financial":   frozenset({"finance", "admin", "executive"}),
+}
+
+
+_SENSITIVITY_CLASSIFIER_PROMPT = """\
+You are a document sensitivity classifier. You receive a short text excerpt that
+matched a sensitivity pattern and must decide if it is genuinely sensitive.
+
+Respond ONLY with valid JSON — no text outside the JSON object:
+{
+    "is_sensitive": true or false,
+    "confidence": "high" or "medium" or "low",
+    "reason": "one sentence",
+    "false_positive_type": "expense" or "price_list" or "technical" or "general_text" or null
+}
+
+Rules:
+- If in doubt respond with is_sensitive: true (fail closed)
+- "EGP 850 team lunch" → false positive (expense), is_sensitive: false
+- "Basic salary EGP 25,000 per month" → is_sensitive: true
+- "diagnosis confirmed by physician" → is_sensitive: true
+- "the diagnosis of the problem was fixed" → is_sensitive: false (technical context)
+"""
+
+
+def extract_surrounding_context(content: str, match_text: str, window: int = 100) -> str:
+    """Return up to `window` chars on each side of the first occurrence of match_text."""
+    idx = content.lower().find(match_text.lower())
+    if idx == -1:
+        return match_text[:200]
+    start = max(0, idx - window)
+    end = min(len(content), idx + len(match_text) + window)
+    return content[start:end]
+
+
+def verify_sensitivity_with_llm(
+    pattern_type: str,
+    surrounding_context: str,
+    llm_provider: "LLMProvider",
+    document_hint: str = "unknown",
+) -> dict:
+    """
+    Stage 2: LLM verifies whether a regex match is genuinely sensitive.
+    Only the surrounding context (max 200 chars) is sent — never the full document.
+    Returns a structured verdict. Fails closed on any exception.
+    """
+    try:
+        user_text = (
+            f"Pattern type: {pattern_type}\n"
+            f"Context excerpt: {surrounding_context[:200]}\n"
+            f"Document hint: {document_hint}"
+        )
+        raw = llm_provider.classify(_SENSITIVITY_CLASSIFIER_PROMPT, user_text)
+        return json.loads(raw)
+    except Exception:
+        return {
+            "is_sensitive": True,
+            "confidence": "low",
+            "reason": "Context verification unavailable — treating as sensitive by default",
+            "false_positive_type": None,
+        }
+
+
+def scan_content_for_sensitivity(content: str) -> dict[str, list[str]]:
+    """
+    Deterministic regex scan — never uses LLM.
+    Returns {sensitivity_type: [matched_examples]} for each type detected.
+    Empty dict means no sensitive content found.
+    """
+    detected: dict[str, list[str]] = {}
+    for sensitivity_type, patterns in SENSITIVITY_PATTERNS.items():
+        matches: list[str] = []
+        for pattern in patterns:
+            found = re.findall(pattern, content, re.IGNORECASE)
+            matches.extend(found[:2])
+        if matches:
+            detected[sensitivity_type] = list(dict.fromkeys(matches))[:3]
+    return detected
+
+
+def check_share_mismatch(
+    content: str,
+    recipient_role: str | None,
+    sharer_role: str,
+    document_title: str = "",
+    llm_provider: "LLMProvider | None" = None,
+) -> AppropriatenessDecision:
+    """
+    Checks whether document content is appropriate to share with recipient_role.
+
+    Covers these scenarios:
+    - Scenario A: new document about to be uploaded
+    - Scenario B: existing document being explicitly shared
+    - Scenario E: agent-generated document before delivery
+    - Scenario J: external recipient (recipient_role=None) — always flag sensitive content
+
+    Does NOT block. Returns a flag the human must acknowledge.
+    The human decision must be logged by the caller.
+    """
+    detected = scan_content_for_sensitivity(content)
+    if not detected:
+        return AppropriatenessDecision(
+            flagged=False, reason="", flag_code=None, severity="info"
+        )
+
+    mismatches: list[dict] = []
+    for sensitivity_type, examples in detected.items():
+        required_roles = SENSITIVITY_ROLE_REQUIREMENTS.get(
+            sensitivity_type, frozenset()
+        )
+        # External recipient (None) never has salary/medical/national_id access
+        if recipient_role is None or recipient_role not in required_roles:
+            mismatches.append({
+                "type": sensitivity_type,
+                "required_roles": sorted(required_roles),
+                "recipient_role": recipient_role or "external",
+                "examples": examples,
+            })
+
+    if not mismatches:
+        return AppropriatenessDecision(
+            flagged=False, reason="", flag_code=None, severity="info"
+        )
+
+    # Optional LLM stage: verify each match in context to reduce false positives.
+    # If llm_provider is None, skip and trust the regex result.
+    llm_verdicts: dict[str, dict] = {}
+    if llm_provider is not None:
+        for m in mismatches:
+            examples = m.get("examples", [])
+            if examples:
+                context = extract_surrounding_context(content, examples[0])
+                verdict = verify_sensitivity_with_llm(
+                    pattern_type=m["type"],
+                    surrounding_context=context,
+                    llm_provider=llm_provider,
+                    document_hint=document_title or "unknown",
+                )
+                llm_verdicts[m["type"]] = verdict
+                m["llm_verdict"] = verdict
+
+    types_list = ", ".join(m["type"] for m in mismatches)
+    recipient_desc = (
+        f"role '{recipient_role}'"
+        if recipient_role
+        else "an external recipient (outside the company)"
+    )
+
+    # Build reason — include LLM explanation only when it's a real verdict (not the fallback)
+    llm_reasons = [
+        v.get("reason", "")
+        for v in llm_verdicts.values()
+        if v.get("reason")
+        and v.get("is_sensitive", True)
+        and v.get("confidence", "low") != "low"  # skip low-confidence fallbacks
+    ]
+    llm_detail = f" {llm_reasons[0]}." if llm_reasons else ""
+
+    reason = (
+        f"This document contains {types_list} data.{llm_detail} "
+        f"The intended recipient ({recipient_desc}) does not normally "
+        f"have access to this type of information. "
+        f"This is a flag, not a block — you have the final decision. "
+        f"Your choice will be logged with your name and timestamp."
+    )
+
+    return AppropriatenessDecision(
+        flagged=True,
+        reason=reason,
+        flag_code="share_mismatch",
+        severity="warning",
+    )

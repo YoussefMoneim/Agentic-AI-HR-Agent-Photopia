@@ -738,3 +738,181 @@ class GenerateExperienceCertificateTool(Tool):
             data=result_data,
             action_type="data_write",
         )
+
+
+class CheckDocumentSensitivityTool(Tool):
+    spec = ToolSpec(
+        name="check_document_sensitivity",
+        description=(
+            "Scan a document for sensitive content before sharing it. "
+            "Call this before sharing any document with another person. "
+            "Detects salary data, national IDs, medical information, "
+            "performance records, and financial data. "
+            "Returns a warning if the content is inappropriate for the recipient. "
+            "The human always makes the final decision — this is advisory only. "
+            "Works for new documents not yet in the system."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "document_content": {
+                    "type": "string",
+                    "description": "The full text content of the document to scan.",
+                },
+                "recipient_role": {
+                    "type": "string",
+                    "description": (
+                        "Role of the recipient. Use null or omit for external recipients "
+                        "(outside the company)."
+                    ),
+                },
+                "document_title": {
+                    "type": "string",
+                    "description": "Name of the document (for the audit record).",
+                },
+            },
+            "required": ["document_content"],
+        },
+        allowed_roles=["employee", "hr_staff", "hr_manager", "admin", "executive", "finance", "manager"],
+    )
+
+    def __init__(self, data_source: DataSource) -> None:
+        self._ds = data_source
+
+    def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        from workflow.appropriateness import check_share_mismatch
+        from utils.prompt_security import wrap_untrusted_content
+
+        raw_content = input.get("document_content", "")
+        if not raw_content.strip():
+            return ToolResult(
+                success=False,
+                error="document_content is required and cannot be empty.",
+            )
+
+        # Prompt injection defense — treat document content as untrusted data
+        _ = wrap_untrusted_content("DOCUMENT_CONTENT", raw_content)
+
+        recipient_role = input.get("recipient_role") or None
+        document_title = input.get("document_title", "unnamed document")
+
+        decision = check_share_mismatch(
+            content=raw_content,
+            recipient_role=recipient_role,
+            sharer_role=ctx.role,
+            document_title=document_title,
+        )
+
+        # Always log to workflow_events — flagged or not
+        self._ds.create_workflow_event(
+            ctx.tenant_id, None,
+            "appropriateness_flag" if decision.flagged else "appropriateness_clear",
+            None, ctx.user_id,
+            {
+                "flag_code": decision.flag_code,
+                "flagged": decision.flagged,
+                "action": "check_document_before_share",
+                "caller_role": ctx.role,
+                "recipient_role": recipient_role or "external",
+                "document_title": document_title,
+                "human_decision": None,
+            },
+        )
+
+        return ToolResult(
+            success=True,
+            data={
+                "flagged": decision.flagged,
+                "severity": decision.severity,
+                "reason": decision.reason if decision.flagged else None,
+                "flag_code": decision.flag_code,
+                "message": (
+                    decision.reason
+                    if decision.flagged
+                    else "No sensitivity issues detected. Safe to share."
+                ),
+            },
+            action_type="data_read",
+        )
+
+
+class SensitivityAuditTool(Tool):
+    spec = ToolSpec(
+        name="audit_document_sensitivity",
+        description=(
+            "Audit all company documents for potential access mismatches — "
+            "documents that contain sensitive data but are shared with roles "
+            "that shouldn't see that data. "
+            "This covers the scenario where a sensitive file was added to a "
+            "shared folder and the sharing was never updated. "
+            "Returns a report of flagged documents for HR review."
+        ),
+        input_schema={"type": "object", "properties": {}},
+        allowed_roles=["hr_manager", "admin"],
+    )
+
+    def __init__(self, data_source: DataSource) -> None:
+        self._ds = data_source
+
+    def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        from workflow.appropriateness import SENSITIVITY_ROLE_REQUIREMENTS
+
+        docs = self._ds.get_company_documents(ctx.tenant_id)
+        flagged = []
+
+        for doc in docs:
+            if not doc.get("contains_sensitive_data"):
+                continue
+            sensitive_types = doc.get("sensitive_data_types") or []
+            if not sensitive_types:
+                continue
+
+            group_id = doc.get("allowed_group_id")
+            if not group_id:
+                continue
+
+            group_members = self._ds.get_group_members(ctx.tenant_id, group_id)
+            member_roles = {m.get("role") for m in group_members}
+
+            mismatched_roles = []
+            for sensitivity_type in sensitive_types:
+                required = SENSITIVITY_ROLE_REQUIREMENTS.get(
+                    sensitivity_type, frozenset()
+                )
+                unauthorized = member_roles - required - {"admin"}
+                if unauthorized:
+                    mismatched_roles.extend(list(unauthorized))
+
+            if mismatched_roles:
+                flagged.append({
+                    "document_title": doc.get("title"),
+                    "document_id": doc.get("id"),
+                    "sensitive_data_types": sensitive_types,
+                    "shared_with_group": group_id,
+                    "unauthorized_roles_in_group": list(set(mismatched_roles)),
+                    "recommendation": (
+                        f"This document contains {', '.join(sensitive_types)} data "
+                        f"but is shared with a group that includes "
+                        f"{', '.join(set(mismatched_roles))} roles. "
+                        f"Consider restricting access or moving the document."
+                    ),
+                })
+
+        return ToolResult(
+            success=True,
+            data={
+                "flagged_count": len(flagged),
+                "flagged_documents": flagged,
+                "message": (
+                    f"Found {len(flagged)} document(s) with potential access mismatches."
+                    if flagged
+                    else "No access mismatches detected. All documents appear correctly shared."
+                ),
+                "audit_note": (
+                    "This audit covers documents in the company_documents table. "
+                    "Documents in external systems (Google Drive, SharePoint) "
+                    "require separate integration to audit."
+                ),
+            },
+            action_type="data_read",
+        )

@@ -121,3 +121,96 @@ export async function rejectLeaveRequest(requestId, comment) {
   }
   return res.json()
 }
+
+// ── Document Library ───────────────────────────────────────────────────────────
+
+export async function uploadDemoDocument(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API_URL}/api/documents/upload-demo`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: form,
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Upload failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function pasteDemoDocument(content, filename = 'pasted-text.txt') {
+  const res = await fetch(`${API_URL}/api/documents/paste-demo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ content, filename }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Paste failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function getDemoDocuments() {
+  const res = await fetch(`${API_URL}/api/documents/demo`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Demo documents ${res.status}`)
+  return res.json()
+}
+
+export async function listEmployees() {
+  const res = await fetch(`${API_URL}/api/employees`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Employee list ${res.status}`)
+  return res.json()
+}
+
+export async function checkDocumentShare(docId, { recipientRole, recipientEmployeeCode, recipientName } = {}) {
+  const res = await fetch(`${API_URL}/api/documents/demo/${docId}/check-share`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({
+      recipient_role: recipientRole ?? null,
+      recipient_employee_code: recipientEmployeeCode ?? null,
+      recipient_name: recipientName ?? null,
+    }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Share check failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function recordShareDecision(eventId, decision) {
+  const res = await fetch(`${API_URL}/api/appropriateness/${eventId}/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ decision }),
+  })
+  if (!res.ok) throw new Error(`Decision record failed (${res.status})`)
+  return res.json()
+}
+
+export async function resetDemoDocuments() {
+  const res = await fetch(`${API_URL}/api/documents/demo/reset`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Reset failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function getRecentDocuments() {
+  const res = await fetch(`${API_URL}/api/documents/recent`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Recent documents ${res.status}`)
+  return res.json()
+}

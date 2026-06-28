@@ -2,6 +2,7 @@ import { useState } from 'react'
 import ChatInterface from './components/ChatInterface.jsx'
 import AuditLog from './components/AuditLog.jsx'
 import ApprovalInbox from './components/ApprovalInbox.jsx'
+import DocumentLibrary from './components/DocumentLibrary.jsx'
 import LoginPage from './components/LoginPage.jsx'
 import { getStoredUser, logout } from './api.js'
 
@@ -21,7 +22,7 @@ const HR_ROLES = new Set(['hr_staff', 'hr_manager', 'admin'])
 export default function App() {
   const [user, setUser] = useState(() => getStoredUser())
   const [resetKey, setResetKey] = useState(0)
-  const [inboxVisible, setInboxVisible] = useState(false)
+  const [rightPanel, setRightPanel] = useState('audit') // 'audit' | 'documents' | 'inbox'
   const [pendingCount, setPendingCount] = useState(0)
 
   function handleLogin(userData) {
@@ -33,7 +34,7 @@ export default function App() {
     logout()
     setUser(null)
     setResetKey(k => k + 1)
-    setInboxVisible(false)
+    setRightPanel('audit')
     setPendingCount(0)
   }
 
@@ -98,23 +99,28 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right: inbox toggle (HR only) + user avatar + logout */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-          {HR_ROLES.has(user.role) && (
+        {/* Right: panel tabs + user avatar + logout */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          {[
+            { key: 'audit',     label: 'Audit Log' },
+            { key: 'documents', label: 'Documents' },
+            ...(HR_ROLES.has(user.role) ? [{ key: 'inbox', label: 'Inbox', badge: pendingCount }] : []),
+          ].map(tab => (
             <button
-              onClick={() => setInboxVisible(v => !v)}
+              key={tab.key}
+              onClick={() => setRightPanel(tab.key)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '5px 12px', borderRadius: 7,
-                background: inboxVisible ? '#2a1800' : 'transparent',
-                border: `1px solid ${inboxVisible ? '#92400e' : '#252b42'}`,
-                color: inboxVisible ? '#fbbf24' : '#6b7280',
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '5px 11px', borderRadius: 7,
+                background: rightPanel === tab.key ? '#13151f' : 'transparent',
+                border: `1px solid ${rightPanel === tab.key ? '#2a2d40' : '#1a1d2e'}`,
+                color: rightPanel === tab.key ? '#e8e8f0' : '#6b7280',
                 fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit',
                 transition: 'all 0.15s',
               }}
             >
-              Inbox
-              {pendingCount > 0 && (
+              {tab.label}
+              {tab.badge > 0 && (
                 <span style={{
                   minWidth: 16, height: 16, borderRadius: 8,
                   background: '#f59e0b', color: '#1a0e00',
@@ -122,11 +128,11 @@ export default function App() {
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   padding: '0 4px',
                 }}>
-                  {pendingCount}
+                  {tab.badge}
                 </span>
               )}
             </button>
-          )}
+          ))}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -172,22 +178,23 @@ export default function App() {
 
         {/* Chat panel (~60%) */}
         <div style={{ flex: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #1a1d2e' }}>
-          <ChatInterface key={resetKey} demoRole={user.role} onInboxToggle={HR_ROLES.has(user.role) ? () => setInboxVisible(v => !v) : undefined} />
+          <ChatInterface key={resetKey} demoRole={user.role} onInboxToggle={HR_ROLES.has(user.role) ? () => setRightPanel(p => p === 'inbox' ? 'audit' : 'inbox') : undefined} />
         </div>
 
-        {/* Approval inbox (HR only, toggled) */}
-        {HR_ROLES.has(user.role) && inboxVisible && (
-          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 320 }}>
-            <ApprovalInbox visible={inboxVisible} onCountChange={setPendingCount} />
-          </div>
-        )}
-
-        {/* Audit log panel (~40%) — hidden when inbox is open */}
-        {!inboxVisible && (
-          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 320 }}>
+        {/* Right panel — all three stay mounted; CSS controls visibility */}
+        <div style={{ flex: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 320, position: 'relative' }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'audit' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'audit' ? 'auto' : 'none' }}>
             <AuditLog />
           </div>
-        )}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'documents' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'documents' ? 'auto' : 'none' }}>
+            <DocumentLibrary user={user} />
+          </div>
+          {HR_ROLES.has(user.role) && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'inbox' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'inbox' ? 'auto' : 'none' }}>
+              <ApprovalInbox visible={rightPanel === 'inbox'} onCountChange={setPendingCount} />
+            </div>
+          )}
+        </div>
 
       </div>
     </div>

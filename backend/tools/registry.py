@@ -60,9 +60,11 @@ class ToolRegistry:
 def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "ToolRegistry":
     # Imports deferred to avoid circular imports at module load time
     from tools.documents import (
+        CheckDocumentSensitivityTool,
         GenerateExperienceCertificateTool,
         GenerateSalaryCertificateTool,
         GenerateTwimcLetterTool,
+        SensitivityAuditTool,
     )
     from tools.employee import (
         CalculateEndOfServiceTool,
@@ -115,5 +117,8 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         AddCompensatoryDayTool(data_source),
         # Policy search / RAG (1)
         SearchPolicyTool(data_source),
+        # Document sensitivity tools (2)
+        CheckDocumentSensitivityTool(data_source),
+        SensitivityAuditTool(data_source),
     ]
     return ToolRegistry(tools, audit_logger)

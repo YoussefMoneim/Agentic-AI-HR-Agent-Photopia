@@ -288,3 +288,124 @@ class TestAuditTrail:
             )
             count = cur.fetchone()[0]
         assert count == 0, f"Expected 0 appropriateness_flag events, found {count}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestSensitivityScanner — unit tests, no DB needed
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSensitivityScanner:
+    """Unit tests for scan_content_for_sensitivity — no DB needed."""
+
+    def test_detects_salary_in_english(self):
+        from workflow.appropriateness import scan_content_for_sensitivity
+        result = scan_content_for_sensitivity(
+            "Basic salary: EGP 25,000 per month. Housing allowance: 5,000."
+        )
+        assert "salary" in result
+
+    def test_detects_national_id(self):
+        from workflow.appropriateness import scan_content_for_sensitivity
+        result = scan_content_for_sensitivity(
+            "Employee national ID: 29901011234567"
+        )
+        assert "national_id" in result
+
+    def test_detects_medical_terms(self):
+        from workflow.appropriateness import scan_content_for_sensitivity
+        result = scan_content_for_sensitivity(
+            "Medical report: diagnosis of hypertension confirmed."
+        )
+        assert "medical" in result
+
+    def test_clean_content_returns_empty(self):
+        from workflow.appropriateness import scan_content_for_sensitivity
+        result = scan_content_for_sensitivity(
+            "Please attend the team meeting on Monday at 10 AM in Conference Room B."
+        )
+        assert result == {}
+
+    def test_multiple_types_detected(self):
+        from workflow.appropriateness import scan_content_for_sensitivity
+        result = scan_content_for_sensitivity(
+            "National ID 29901011234567. Basic salary EGP 30,000. "
+            "Medical report: diagnosis confirmed."
+        )
+        assert "salary" in result
+        assert "national_id" in result
+        assert "medical" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestShareMismatch — unit tests, no DB needed
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestShareMismatch:
+    """Tests for check_share_mismatch — no DB needed."""
+
+    def test_salary_flagged_for_employee(self):
+        from workflow.appropriateness import check_share_mismatch
+        result = check_share_mismatch(
+            content="Basic salary: EGP 25,000 per month.",
+            recipient_role="employee",
+            sharer_role="hr_manager",
+        )
+        assert result.flagged is True
+        assert result.flag_code == "share_mismatch"
+        assert result.severity == "warning"
+
+    def test_salary_not_flagged_for_hr_manager(self):
+        from workflow.appropriateness import check_share_mismatch
+        result = check_share_mismatch(
+            content="Basic salary: EGP 25,000 per month.",
+            recipient_role="hr_manager",
+            sharer_role="admin",
+        )
+        assert result.flagged is False
+
+    def test_external_recipient_always_flagged_for_sensitive(self):
+        from workflow.appropriateness import check_share_mismatch
+        result = check_share_mismatch(
+            content="Basic salary: EGP 25,000.",
+            recipient_role=None,  # external
+            sharer_role="hr_manager",
+        )
+        assert result.flagged is True
+        assert "external" in result.reason.lower()
+
+    def test_clean_content_never_flagged(self):
+        from workflow.appropriateness import check_share_mismatch
+        result = check_share_mismatch(
+            content="Please join the all-hands meeting on Tuesday.",
+            recipient_role="employee",
+            sharer_role="manager",
+        )
+        assert result.flagged is False
+
+    def test_national_id_flagged_for_employee(self):
+        from workflow.appropriateness import check_share_mismatch
+        result = check_share_mismatch(
+            content="Employee national ID: 29901011234567",
+            recipient_role="employee",
+            sharer_role="hr_manager",
+        )
+        assert result.flagged is True
+
+    def test_financial_flagged_for_employee(self):
+        from workflow.appropriateness import check_share_mismatch
+        result = check_share_mismatch(
+            content="Q2 revenue forecast: EGP 2.5M. Budget allocation approved.",
+            recipient_role="employee",
+            sharer_role="executive",
+        )
+        assert result.flagged is True
+        assert "financial" in result.reason.lower()
+
+    def test_financial_not_flagged_for_finance_role(self):
+        from workflow.appropriateness import check_share_mismatch
+        result = check_share_mismatch(
+            content="Q2 revenue forecast: EGP 2.5M.",
+            recipient_role="finance",
+            sharer_role="executive",
+        )
+        assert result.flagged is False

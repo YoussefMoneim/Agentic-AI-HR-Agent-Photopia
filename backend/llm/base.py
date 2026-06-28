@@ -27,3 +27,11 @@ class LLMProvider(ABC):
         tools: list[dict] | None,
         system: str,
     ) -> LLMResponse: ...
+
+    def classify(self, system_prompt: str, user_text: str) -> str:
+        """
+        Single-turn classification call.
+        Returns raw response text (expected to be JSON).
+        Default: fail-closed fallback for providers that don't override this.
+        """
+        return '{"is_sensitive": true, "confidence": "low", "reason": "Classification not available for this provider", "false_positive_type": null}'
