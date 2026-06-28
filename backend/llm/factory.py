@@ -12,4 +12,8 @@ def get_llm() -> LLMProvider:
         from llm.grok import GrokProvider
         return GrokProvider(api_key=config.XAI_API_KEY)
 
-    raise ValueError(f"Unknown LLM_PROVIDER: {config.LLM_PROVIDER!r}. Supported: claude, grok")
+    if config.LLM_PROVIDER == "gemini":
+        from llm.gemini import GeminiProvider
+        return GeminiProvider(api_key=config.GEMINI_API_KEY, model=config.LLM_MODEL)
+
+    raise ValueError(f"Unknown LLM_PROVIDER: {config.LLM_PROVIDER!r}. Supported: claude, grok, gemini")

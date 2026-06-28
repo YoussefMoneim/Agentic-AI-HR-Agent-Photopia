@@ -56,7 +56,7 @@ def _week_start(d: date) -> date:
 _LEAVE_FIELD_REQUIREMENTS: dict[str, dict] = {
     "annual":        {"reason_required": False},
     "sick":          {"reason_required": False,
-                      "attachment_note": "A medical certificate is required for sick leave exceeding 3 consecutive days."},
+                      "attachment_note": "A medical report from a company network provider must be submitted to HR."},
     "emergency":     {"reason_required": False},
     "permission":    {"reason_required": False},
     "wfh":           {"reason_required": False},
@@ -68,6 +68,22 @@ _LEAVE_FIELD_REQUIREMENTS: dict[str, dict] = {
                       "reason_prompt": "What is the purpose of the outside duty assignment?"},
     "unpaid":        {"reason_required": True,
                       "reason_prompt": "What is the reason for the unpaid leave request?"},
+    "marriage":      {"reason_required": False,
+                      "attachment_note": "Marriage certificate documentation required. Leave is available once per service life after 1+ year of service."},
+    "hajj":          {"reason_required": False,
+                      "attachment_note": "Hajj registration documentation required. Requires 5+ consecutive years of full-time service. Available once per service life."},
+    "umrah":         {"reason_required": False,
+                      "attachment_note": "Supporting documentation required. Available once per service life after 1+ year of service."},
+    "funeral":       {"reason_required": True,
+                      "reason_prompt": "Please specify the relationship to the deceased (e.g. father, mother, spouse — 3 days; or grandparent, sibling — 1 day)."},
+    "maternity":     {"reason_required": False,
+                      "attachment_note": "Medical documentation required. Available up to 3 times during service. Requires 1+ year of service."},
+    "paternity":     {"reason_required": False,
+                      "attachment_note": "Hospital or birth documentation required. Must be taken on the delivery/surgery day. Available up to 3 times during service."},
+    "educational":   {"reason_required": False,
+                      "attachment_note": "Exam schedule and enrolment confirmation must be shared with HR and direct manager in advance."},
+    "military":      {"reason_required": False,
+                      "attachment_note": "Official military authority summons letter required."},
 }
 
 

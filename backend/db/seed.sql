@@ -32,45 +32,94 @@ WHERE e.employee_code IN ('EMP001', 'EMP003')
   AND mgr.employee_code = 'EMP002'
   AND e.tenant_id = mgr.tenant_id;
 
--- ─── Leave types (9 types) ────────────────────────────────────────────────────
+-- ─── Leave types — sourced from Leaves Policy EG Ref: HR/BTE 001/7-2025 ──────
 -- Columns: code, name_en, name_ar, requires_approval, requires_documentation,
 --          deducts_balance, is_time_based, requires_hr_review,
 --          max_days_per_year, max_consecutive_days
 
+-- Annual: 21 days/year (15 in hire year, 30 for age 50+ or 10+ SI years). Balance-tracked.
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'annual', 'Annual Leave', 'إجازة سنوية', TRUE, FALSE, TRUE, FALSE, TRUE, 21, NULL
 FROM tenants WHERE slug = 'fotopia';
 
+-- Sick: requires medical report from company network provider
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'sick', 'Sick Leave', 'إجازة مرضية', TRUE, TRUE, TRUE, FALSE, TRUE, NULL, NULL
 FROM tenants WHERE slug = 'fotopia';
 
+-- Emergency: kept for backward compatibility; Funeral/Bereavement now has its own type below
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'emergency', 'Emergency Leave', 'إجازة طارئة', TRUE, FALSE, FALSE, FALSE, TRUE, NULL, 6
 FROM tenants WHERE slug = 'fotopia';
 
+-- Permission: hours-based, not days
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'permission', 'Permission', 'إذن خروج', TRUE, FALSE, FALSE, TRUE, FALSE, NULL, NULL
 FROM tenants WHERE slug = 'fotopia';
 
+-- Business trip
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'business_trip', 'Business Trip', 'رحلة عمل', TRUE, FALSE, FALSE, FALSE, TRUE, NULL, NULL
 FROM tenants WHERE slug = 'fotopia';
 
+-- WFH: max 2 days/week, 8 days/month (enforced via leave_policies)
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'wfh', 'Work From Home', 'عمل من المنزل', TRUE, FALSE, FALSE, FALSE, FALSE, NULL, NULL
 FROM tenants WHERE slug = 'fotopia';
 
+-- Outside duty
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'outside_duty', 'Outside Duty', 'مهمة خارجية', TRUE, FALSE, FALSE, FALSE, FALSE, NULL, NULL
 FROM tenants WHERE slug = 'fotopia';
 
+-- Compensatory: earned by working 4+ hours on holiday/weekend; added to vacation balance
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'compensatory', 'Compensatory Off', 'إجازة تعويضية', TRUE, FALSE, TRUE, FALSE, TRUE, NULL, NULL
 FROM tenants WHERE slug = 'fotopia';
 
+-- Unpaid
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'unpaid', 'Unpaid Leave', 'إجازة بدون مرتب', TRUE, FALSE, FALSE, FALSE, TRUE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+-- Marriage: 5 days paid, once per service life, 1+ year service required
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'marriage', 'Marriage Leave', 'إجازة زواج', TRUE, TRUE, FALSE, FALSE, TRUE, 5, 5
+FROM tenants WHERE slug = 'fotopia';
+
+-- Hajj: up to 30 days, 5+ years service, once per service life
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'hajj', 'Hajj Leave', 'إجازة حج', TRUE, TRUE, FALSE, FALSE, TRUE, 30, 30
+FROM tenants WHERE slug = 'fotopia';
+
+-- Umrah: 5 days paid, once per service life, 1+ year service required
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'umrah', 'Umrah Leave', 'إجازة عمرة', TRUE, TRUE, FALSE, FALSE, TRUE, 5, 5
+FROM tenants WHERE slug = 'fotopia';
+
+-- Funeral/Bereavement: 3 days 1st-degree relatives, 1 day 2nd-degree (enforced in tool logic)
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'funeral', 'Funeral/Bereavement Leave', 'إجازة وفاة', TRUE, FALSE, FALSE, FALSE, TRUE, 3, 3
+FROM tenants WHERE slug = 'fotopia';
+
+-- Maternity: 4 months (120 days) full pay, 1+ year service, max 3 times during service
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'maternity', 'Maternity Leave', 'إجازة أمومة', TRUE, TRUE, FALSE, FALSE, TRUE, 120, 120
+FROM tenants WHERE slug = 'fotopia';
+
+-- Paternity: 1 day on delivery surgery day only, max 3 times during service
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'paternity', 'Paternity Leave', 'إجازة أبوة', TRUE, TRUE, FALSE, FALSE, TRUE, 1, 1
+FROM tenants WHERE slug = 'fotopia';
+
+-- Educational: restricted to exam days only, schedule must be shared with HR in advance
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'educational', 'Educational Leave', 'إجازة دراسية', TRUE, TRUE, FALSE, FALSE, TRUE, NULL, NULL
+FROM tenants WHERE slug = 'fotopia';
+
+-- Military service: full paid, duration per official military authority letter
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
+SELECT id, 'military', 'Military Service Leave', 'إجازة خدمة عسكرية', FALSE, TRUE, FALSE, FALSE, TRUE, NULL, NULL
 FROM tenants WHERE slug = 'fotopia';
 
 -- ─── Leave balances for 2026 ──────────────────────────────────────────────────
