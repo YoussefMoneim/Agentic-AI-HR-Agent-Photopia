@@ -274,6 +274,79 @@ class DataSource(ABC):
         approved_by_employee_id is the UUID of the manager who pre-approved the work.
         Returns {success, new_allocated_days, leave_balance_id}."""
 
+    # ─── Leave: cancellation methods ──────────────────────────────────────────
+
+    @abstractmethod
+    def request_leave_cancellation(
+        self,
+        tenant_id: str,
+        leave_request_id: str,
+        requesting_employee_id: str,
+        reason: str | None,
+    ) -> dict:
+        """Atomically set status=cancellation_pending and record the cancellation request.
+        Verifies status is manager_approved or hr_approved before updating.
+        Returns {success, leave_request_id, employee_name, leave_type, start_date, end_date}."""
+
+    @abstractmethod
+    def approve_leave_cancellation(
+        self,
+        tenant_id: str,
+        leave_request_id: str,
+        decided_by_employee_id: str,
+        consumed_days: float | None,
+    ) -> dict:
+        """Atomically approve a cancellation_pending leave request.
+        Calculates days_to_restore:
+          - If consumed_days provided: days_to_restore = days_requested - consumed_days
+          - elif start_date > today: full restore (days_to_restore = days_requested)
+          - elif end_date < today: 0 (fully consumed)
+          - else (in progress, no consumed_days): 0 (conservative)
+        Updates leave_requests status=cancelled and restores used_days in leave_balances
+        using GREATEST(0, used_days - days_to_restore) to prevent negatives.
+        Returns {success, days_restored, new_used_days, employee_name, leave_type}."""
+
+    @abstractmethod
+    def get_pending_cancellations(self, tenant_id: str) -> list[dict]:
+        """Return leave_requests with status=cancellation_pending for this tenant,
+        ordered by cancellation_requested_at ASC (oldest first).
+        Each row includes: id, employee_name, leave_type_name, start_date, end_date,
+        days_requested, cancellation_reason, cancellation_requested_at."""
+
+    @abstractmethod
+    def get_leave_request_by_token(self, tenant_id: str, correlation_token: str) -> dict | None:
+        """Return the enriched leave request (same shape as get_leave_request_by_id) for the
+        pending_action identified by correlation_token, plus two extra keys:
+          approver_employee_code — the manager's employee_code
+          approver_role          — the manager's role (falls back to 'hr_manager' if NULL)
+        Returns None if the token is not found or the action is already resolved.
+        Used to run evaluate_constraints() BEFORE resolve_pending_action() in the email-link path."""
+
+    @abstractmethod
+    def get_team_calendar(
+        self,
+        tenant_id: str,
+        caller_role: str,
+        caller_employee_id: str,
+        year: int,
+        month: int,
+        department: str | None = None,
+    ) -> dict:
+        """Return team leave calendar data for the given month, role-scoped.
+
+        events — role-scoped:
+          employee  → only caller's own leave requests
+          manager   → direct reports (employees WHERE manager_id = caller_employee_id)
+          hr/admin  → all employees (optionally filtered by department)
+
+        daily_summary — always built from all employees in the tenant (or filtered dept)
+          so an employee sees meaningful team-wide counts without seeing names.
+
+        Privacy: employee_name / employee_code / leave_type_* are None for events
+        where is_own=False and caller_role is 'employee'.
+
+        Returns {events, daily_summary, departments, total_employees_in_scope}."""
+
     # ─── RAG / policy search ───────────────────────────────────────────────────
 
     @abstractmethod

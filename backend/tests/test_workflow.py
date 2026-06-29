@@ -303,7 +303,7 @@ class TestApprovalRouting:
         mgr_ctx = ctx(role="hr_manager", employee_code="EMP002")
         result = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-11", "end_date": "2026-07-12",
+            {"leave_type_code": "annual", "start_date": "2026-07-20", "end_date": "2026-07-21",
              "reason": "top of hierarchy test"},
             mgr_ctx,
         )

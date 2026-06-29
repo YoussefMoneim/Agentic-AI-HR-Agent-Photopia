@@ -96,16 +96,25 @@ export async function fetchPendingApprovals() {
   return res.json()
 }
 
-export async function approveLeaveRequest(requestId, comment) {
+export async function approveLeaveRequest(requestId, comment, overrideReason) {
   const res = await fetch(`${API_URL}/api/leave/${requestId}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ comment: comment || null }),
+    body: JSON.stringify({ comment: comment || null, override_reason: overrideReason || null }),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.detail || `Approve failed (${res.status})`)
   }
+  return res.json()
+}
+
+export async function checkLeaveConstraints(requestId) {
+  const res = await fetch(`${API_URL}/api/leave/${requestId}/check-constraints`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Constraint check failed (${res.status})`)
   return res.json()
 }
 
@@ -207,10 +216,41 @@ export async function resetDemoDocuments() {
   return res.json()
 }
 
+export async function getPendingCancellations() {
+  const res = await fetch(`${API_URL}/api/leave/pending-cancellations`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Pending cancellations ${res.status}`)
+  return res.json()
+}
+
+export async function approveLeaveCancellation(requestId, consumedDays) {
+  const res = await fetch(`${API_URL}/api/leave/${requestId}/approve-cancellation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ consumed_days: consumedDays ?? null }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Approve cancellation failed (${res.status})`)
+  }
+  return res.json()
+}
+
 export async function getRecentDocuments() {
   const res = await fetch(`${API_URL}/api/documents/recent`, {
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(`Recent documents ${res.status}`)
+  return res.json()
+}
+
+export async function getLeaveCalendar(year, month, department = null) {
+  const params = new URLSearchParams({ year, month })
+  if (department) params.append('department', department)
+  const res = await fetch(`${API_URL}/api/calendar/leave?${params}`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Calendar fetch failed (${res.status})`)
   return res.json()
 }

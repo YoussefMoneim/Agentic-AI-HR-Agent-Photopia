@@ -22,6 +22,7 @@ from llm.factory import get_llm
 from services import email as email_svc
 from tools.base import ToolContext
 from tools.registry import ToolRegistry, build_registry
+from workflow.constraints import evaluate_constraints
 
 logging.basicConfig(level=logging.INFO)
 
@@ -144,19 +145,7 @@ def list_employees_for_ui(authorization: str | None = Header(default=None)):
         with conn.cursor() as cur:
             cur.execute("SET ROLE fotopia_app")
             cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
-            if ctx.role == "employee":
-                cur.execute(
-                    """
-                    SELECT e.employee_code, e.full_name, COALESCE(u.role, 'employee'),
-                           e.department, e.position
-                    FROM employees e
-                    LEFT JOIN users u ON u.employee_id = e.id AND u.tenant_id = e.tenant_id
-                    WHERE e.tenant_id = %s::uuid AND e.employee_code = %s
-                    """,
-                    (ctx.tenant_id, ctx.employee_code),
-                )
-            else:
-                cur.execute(
+            cur.execute(
                     """
                     SELECT e.employee_code, e.full_name, COALESCE(u.role, 'employee'),
                            e.department, e.position
@@ -277,6 +266,34 @@ def chat(body: ChatRequest, authorization: str | None = Header(default=None)):
     )
 
 
+def _resolve_page(icon: str, title_color: str, title: str, message: str, details: str = "") -> str:
+    details_block = (
+        f'<div style="background:#f8f8fb;border-radius:6px;padding:14px 20px;'
+        f'font-size:13px;color:#444;text-align:left">{details}</div>'
+    ) if details else ""
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fotopia HR System</title></head>
+<body style="margin:0;padding:0;background:#f4f4f7;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center">
+  <div style="max-width:480px;width:90%;text-align:center">
+    <div style="background:#0a0c1a;padding:20px 30px;border-radius:8px 8px 0 0">
+      <div style="color:#fff;font-size:18px;font-weight:bold">Fotopia HR System</div>
+      <div style="color:#c9a84c;font-size:12px;margin-top:4px">WIN Holding Group &mdash; HR Portal</div>
+    </div>
+    <div style="background:#fff;padding:40px 36px;border-radius:0 0 8px 8px;box-shadow:0 4px 20px rgba(0,0,0,0.08)">
+      <div style="font-size:48px;margin-bottom:16px">{icon}</div>
+      <h2 style="margin:0 0 12px 0;color:{title_color};font-size:22px">{title}</h2>
+      <p style="margin:0 0 24px 0;color:#555;font-size:14px;line-height:1.6">{message}</p>
+      {details_block}
+      <p style="margin:24px 0 0 0;font-size:11px;color:#aaa">You can close this tab. The employee has been notified.</p>
+    </div>
+    <p style="margin:16px 0 0 0;font-size:11px;color:#999">Fotopia HR System &mdash; Automated action</p>
+  </div>
+</body>
+</html>"""
+
+
 # STEP 7 — EMAIL LISTENER HOOK
 # Phase 2: when the HR Manager inbox is connected, inbound email replies will
 # be parsed for the correlation_token embedded in the approve/reject URL and
@@ -300,6 +317,47 @@ def resolve_leave_request(
     if not all(c in "0123456789abcdefABCDEF-" for c in correlation_token):
         raise HTTPException(status_code=400, detail="Invalid token format")
 
+    # Constraint check for approval decisions only — must run BEFORE state change
+    if decision == "approved":
+        lr_check = _data_source.get_leave_request_by_token(_fotopia_tenant_id, correlation_token)
+        if lr_check:  # None = already resolved; let resolve_pending_action() return its own error
+            approver_ctx = ToolContext(
+                tenant_id=_fotopia_tenant_id,
+                user_id=lr_check.get("approver_employee_code", "email_link"),
+                role=lr_check.get("approver_role", "hr_manager"),
+                employee_code=lr_check.get("approver_employee_code", ""),
+            )
+            constraint = evaluate_constraints(approver_ctx, "approve_leave", lr_check, _data_source)
+            if constraint.verdict == "blocked":
+                _emp   = lr_check.get("employee_name", lr_check.get("employee_code", ""))
+                _code  = lr_check.get("employee_code", "")
+                _type  = lr_check.get("leave_type_name", "")
+                _start = lr_check.get("start_date", "")
+                _end   = lr_check.get("end_date", "")
+                _days  = lr_check.get("days_requested") or 0
+                return HTMLResponse(content=_resolve_page(
+                    icon="🚫",
+                    title_color="#dc2626",
+                    title="Approval Not Permitted",
+                    message=f"This leave cannot be approved via email link: <strong>{constraint.reason}</strong> No changes were made.",
+                    details=f"Employee: {_emp} ({_code}) &nbsp;|&nbsp; Leave: {_type} &nbsp;|&nbsp; {_start} &rarr; {_end} &nbsp;|&nbsp; {_days:.0f} days",
+                ), status_code=200)
+            if constraint.verdict == "requires_override":
+                _emp   = lr_check.get("employee_name", lr_check.get("employee_code", ""))
+                _code  = lr_check.get("employee_code", "")
+                _type  = lr_check.get("leave_type_name", "")
+                _start = lr_check.get("start_date", "")
+                _end   = lr_check.get("end_date", "")
+                _days  = lr_check.get("days_requested") or 0
+                return HTMLResponse(content=_resolve_page(
+                    icon="⚠️",
+                    title_color="#d97706",
+                    title="Additional Review Required",
+                    message=f"This approval requires a justification override: <strong>{constraint.reason}</strong>",
+                    details=f"Employee: {_emp} ({_code}) &nbsp;|&nbsp; Leave: {_type} &nbsp;|&nbsp; {_start} &rarr; {_end} &nbsp;|&nbsp; {_days:.0f} days<br><br>Please approve from the HR inbox where you can provide an override reason.",
+                ), status_code=200)
+            # verdict == "allowed" or "advisory": fall through to resolve_pending_action()
+
     result = _data_source.resolve_pending_action(
         tenant_id=_fotopia_tenant_id,
         correlation_token=correlation_token,
@@ -310,16 +368,29 @@ def resolve_leave_request(
 
     if not result.get("success"):
         error_msg = result.get("error", "Could not process this request.")
-        return HTMLResponse(
-            content=f"""
-            <html><body style="font-family:sans-serif;max-width:500px;margin:60px auto;text-align:center">
-            <h2>⚠️ Unable to Process Request</h2>
-            <p>{error_msg}</p>
-            <p>The request may have already been resolved, or the link has expired.</p>
-            </body></html>
-            """,
-            status_code=409,
-        )
+        if "Already resolved" in error_msg:
+            _status = error_msg.replace("Already resolved: ", "").replace("_", " ").title()
+            return HTMLResponse(content=_resolve_page(
+                icon="ℹ️",
+                title_color="#2563eb",
+                title="Already Processed",
+                message="This leave request has already been processed. No further action is needed.",
+                details=f"Status: {_status}",
+            ), status_code=409)
+        elif "expired" in error_msg.lower():
+            return HTMLResponse(content=_resolve_page(
+                icon="⏱️",
+                title_color="#d97706",
+                title="Link Expired",
+                message="This approval link has expired. Please use the HR inbox to process pending requests.",
+            ), status_code=409)
+        else:
+            return HTMLResponse(content=_resolve_page(
+                icon="⚠️",
+                title_color="#d97706",
+                title="Unable to Process Request",
+                message=error_msg,
+            ), status_code=409)
 
     employee_code = result.get("employee_code", "")
     days = result.get("days_requested", 0)
@@ -340,17 +411,46 @@ def resolve_leave_request(
                 body_plain=f"Your leave request ({days:.0f} days) has been {status_word}.",
             )
 
-    return HTMLResponse(
-        content=f"""
-        <html><body style="font-family:sans-serif;max-width:500px;margin:60px auto;text-align:center">
-        <h2>Leave Request {action_word}</h2>
-        <p>The leave request for <strong>{employee_code}</strong>
-           ({days:.0f} {'day' if days == 1 else 'days'}) has been <strong>{decision}</strong>.</p>
-        <p>The employee has been notified.</p>
-        </body></html>
-        """,
-        status_code=200,
-    )
+    # Odoo sync for approved leaves — non-blocking
+    if decision == "approved" and config.ODOO_ENABLED and _data_source:
+        try:
+            from services.odoo_sync import sync_approved_leave
+            import logging as _logging
+            _lr_full = _data_source.get_leave_request_by_id(
+                _fotopia_tenant_id, result.get("leave_request_id", "")
+            )
+            _emp_odoo = _data_source.get_employee_by_code(_fotopia_tenant_id, employee_code) if employee_code else None
+            _emp_email = _emp_odoo.get("email") if _emp_odoo else None
+            if _lr_full and _emp_email:
+                _odoo = sync_approved_leave(
+                    employee_email=_emp_email,
+                    leave_type_code=_lr_full.get("leave_type_code", ""),
+                    start_date=str(_lr_full.get("start_date", "")),
+                    end_date=str(_lr_full.get("end_date", "")),
+                    reason=_lr_full.get("reason"),
+                    our_request_id=result.get("leave_request_id", ""),
+                )
+                if not _odoo.get("skipped") and not _odoo.get("synced"):
+                    _logging.getLogger(__name__).warning(
+                        "Odoo sync failed (non-blocking): %s", _odoo.get("error")
+                    )
+        except Exception as _odoo_err:
+            import logging as _logging
+            _logging.getLogger(__name__).error("Odoo sync exception (non-blocking): %s", _odoo_err)
+
+    if decision == "approved":
+        _icon, _color, _title = "✅", "#16a34a", "Leave Request Approved"
+        _msg = "The leave request has been approved. The employee has been notified."
+    else:
+        _icon, _color, _title = "❌", "#dc2626", "Leave Request Rejected"
+        _msg = "The leave request has been rejected. The employee has been notified."
+    return HTMLResponse(content=_resolve_page(
+        icon=_icon,
+        title_color=_color,
+        title=_title,
+        message=_msg,
+        details=f"Employee: {employee_code} &nbsp;|&nbsp; Duration: {days:.0f} {'day' if days == 1 else 'days'}",
+    ), status_code=200)
 
 
 class SimulateInboundRequest(BaseModel):
@@ -421,6 +521,7 @@ def get_leave_pending_count():
 
 class ApproveBody(BaseModel):
     comment: str | None = None
+    override_reason: str | None = None
 
 
 class RejectBody(BaseModel):
@@ -439,6 +540,27 @@ def get_pending_approvals_queue(authorization: str | None = Header(default=None)
     return {"items": items, "count": len(items)}
 
 
+@app.post("/api/leave/{request_id}/check-constraints")
+def check_leave_constraints_endpoint(
+    request_id: str,
+    authorization: str | None = Header(default=None),
+):
+    """Read-only constraint preflight for the inbox UI. Returns verdict with no state change."""
+    if not _fotopia_tenant_id or not _data_source:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    lr = _data_source.get_leave_request_by_id(_fotopia_tenant_id, request_id)
+    if not lr:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    constraint = evaluate_constraints(ctx, "approve_leave", lr, _data_source)
+    return {
+        "verdict": constraint.verdict,
+        "reason": constraint.reason,
+        "flags": constraint.flags,
+        "override_reason_required": constraint.override_reason_required,
+    }
+
+
 @app.post("/api/leave/{request_id}/approve")
 def approve_leave_via_inbox(
     request_id: str,
@@ -451,7 +573,7 @@ def approve_leave_via_inbox(
     ctx = _build_context(authorization, None)
     result = _registry.execute(
         "approve_leave_request",
-        {"request_id": request_id, "comment": body.comment},
+        {"request_id": request_id, "comment": body.comment, "override_reason": body.override_reason},
         ctx,
     )
     if not result.success:
@@ -477,6 +599,99 @@ def reject_leave_via_inbox(
     if not result.success:
         raise HTTPException(status_code=400, detail=result.error)
     return result.data
+
+
+class RequestCancellationBody(BaseModel):
+    reason: str | None = None
+
+
+class ApproveCancellationBody(BaseModel):
+    consumed_days: float | None = None
+
+
+@app.post("/api/leave/{request_id}/request-cancellation")
+def request_leave_cancellation_via_api(
+    request_id: str,
+    body: RequestCancellationBody,
+    authorization: str | None = Header(default=None),
+):
+    """Submit a cancellation request for an already-approved leave. Any role; own leave only for employees."""
+    if not _registry or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    result = _registry.execute(
+        "request_leave_cancellation",
+        {"request_id": request_id, "reason": body.reason},
+        ctx,
+    )
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    return result.data
+
+
+@app.post("/api/leave/{request_id}/approve-cancellation")
+def approve_leave_cancellation_via_api(
+    request_id: str,
+    body: ApproveCancellationBody,
+    authorization: str | None = Header(default=None),
+):
+    """Approve a pending cancellation and restore the balance. HR only."""
+    if not _registry or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    result = _registry.execute(
+        "approve_leave_cancellation",
+        {"request_id": request_id, "consumed_days": body.consumed_days},
+        ctx,
+    )
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    return result.data
+
+
+@app.get("/api/leave/pending-cancellations")
+def get_pending_cancellations_via_api(authorization: str | None = Header(default=None)):
+    """Return all leave requests pending HR cancellation approval."""
+    if not _registry or not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    result = _registry.execute("get_pending_cancellations", {}, ctx)
+    if not result.success:
+        raise HTTPException(status_code=403, detail=result.error)
+    return result.data
+
+
+@app.get("/api/calendar/leave")
+def get_leave_calendar(
+    year: int | None = None,
+    month: int | None = None,
+    department: str | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """Team leave calendar — role-scoped view of who is on leave for a given month."""
+    if not _fotopia_tenant_id or not _data_source:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    from datetime import date as _date
+    ctx = _build_context(authorization, None)
+    today = _date.today()
+    year  = year  or today.year
+    month = month or today.month
+    if not (1 <= month <= 12):
+        raise HTTPException(status_code=400, detail="month must be 1-12")
+    if not (2020 <= year <= 2030):
+        raise HTTPException(status_code=400, detail="year must be between 2020 and 2030")
+    emp = _data_source.get_employee_by_code(_fotopia_tenant_id, ctx.employee_code)
+    caller_employee_id = str(emp["id"]) if emp else None
+    result = _data_source.get_team_calendar(
+        tenant_id=_fotopia_tenant_id,
+        caller_role=ctx.role,
+        caller_employee_id=caller_employee_id,
+        year=year,
+        month=month,
+        department=department if ctx.role in ("hr_staff", "hr_manager", "admin") else None,
+    )
+    result["viewer_role"] = ctx.role
+    return result
 
 
 @app.get("/api/audit-log")
@@ -658,7 +873,7 @@ def paste_demo_document(
 
 @app.get("/api/documents/demo")
 def get_demo_documents(authorization: str | None = Header(default=None)):
-    """Return demo documents for this tenant (employees see only their own)."""
+    """Return demo documents uploaded by the current user (all roles isolated by uploaded_by)."""
     if not _fotopia_tenant_id:
         raise HTTPException(status_code=503, detail="Service not ready")
     ctx = _build_context(authorization, None)
@@ -667,28 +882,16 @@ def get_demo_documents(authorization: str | None = Header(default=None)):
         with conn.cursor() as cur:
             cur.execute("SET ROLE fotopia_app")
             cur.execute("SET app.current_tenant_id = %s", (ctx.tenant_id,))
-            if ctx.role == "employee":
-                cur.execute(
-                    """
-                    SELECT id, filename, is_sensitive, sensitivity_scan,
-                           uploaded_by, created_at
-                    FROM demo_documents
-                    WHERE tenant_id = %s AND uploaded_by = %s
-                    ORDER BY created_at DESC LIMIT 50
-                    """,
-                    (ctx.tenant_id, ctx.user_id),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id, filename, is_sensitive, sensitivity_scan,
-                           uploaded_by, created_at
-                    FROM demo_documents
-                    WHERE tenant_id = %s
-                    ORDER BY created_at DESC LIMIT 50
-                    """,
-                    (ctx.tenant_id,),
-                )
+            cur.execute(
+                """
+                SELECT id, filename, is_sensitive, sensitivity_scan,
+                       uploaded_by, created_at
+                FROM demo_documents
+                WHERE tenant_id = %s AND uploaded_by = %s
+                ORDER BY created_at DESC LIMIT 50
+                """,
+                (ctx.tenant_id, ctx.user_id),
+            )
             cols = ["id", "filename", "is_sensitive", "sensitivity_scan", "uploaded_by", "created_at"]
             rows = []
             for row in cur.fetchall():

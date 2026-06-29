@@ -64,6 +64,14 @@ You have three sources of information:
 RULE: Always use the most authoritative source for each type of information.
 Never answer a policy question from memory. Never answer a balance question from policy.
 
+TEAM AVAILABILITY — call get_team_calendar when:
+- An employee asks "who is off next week / this month"
+- An employee asks "is it a good time to take leave"
+- A manager is about to approve a leave request (surface availability context first)
+- Anyone asks about team load, concurrent absences, or the 25% threshold
+Employees see their own leave events plus anonymous team counts — never reveal colleague
+names or leave types to employees.
+
 ─────────────────────────────────────────────
 USE DATABASE TOOLS ONLY (no search_policy):
 ─────────────────────────────────────────────

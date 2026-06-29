@@ -114,6 +114,36 @@ def can_access(caller: "ToolContext", action: str, target: dict) -> AccessDecisi
             )
         return AccessDecision(allowed=True)
 
+    # ── request_leave_cancellation ─────────────────────────────────────────────
+    # Any role may request cancellation; employees only for their own leave.
+    if action == "request_leave_cancellation":
+        request_owner = target.get("request_employee_code", "")
+        if role == "employee" and request_owner != caller.employee_code:
+            return AccessDecision(
+                allowed=False,
+                reason="You can only request cancellation of your own leave.",
+            )
+        return AccessDecision(allowed=True)
+
+    # ── approve_leave_cancellation ─────────────────────────────────────────────
+    # HR roles only — employees cannot approve cancellations (even of their own).
+    if action == "approve_leave_cancellation":
+        if role not in _APPROVE_REJECT_ROLES:
+            return AccessDecision(
+                allowed=False,
+                reason=f"Role '{role}' is not permitted to approve leave cancellations.",
+            )
+        return AccessDecision(allowed=True)
+
+    # ── view_pending_cancellations ─────────────────────────────────────────────
+    if action == "view_pending_cancellations":
+        if role not in _APPROVE_REJECT_ROLES:
+            return AccessDecision(
+                allowed=False,
+                reason=f"Role '{role}' is not permitted to view pending cancellations.",
+            )
+        return AccessDecision(allowed=True)
+
     # Fail-closed: unknown action
     return AccessDecision(
         allowed=False,

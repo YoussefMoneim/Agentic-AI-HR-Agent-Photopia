@@ -59,6 +59,7 @@ class ToolRegistry:
 
 def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "ToolRegistry":
     # Imports deferred to avoid circular imports at module load time
+    from tools.calendar import GetTeamCalendarTool
     from tools.documents import (
         CheckDocumentSensitivityTool,
         GenerateExperienceCertificateTool,
@@ -77,6 +78,7 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
     )
     from tools.leave import (
         AddCompensatoryDayTool,
+        ApproveLeaveCancellationTool,
         ApproveLeaveRequestTool,
         CancelLeaveRequestTool,
         CheckLeaveBalanceTool,
@@ -85,7 +87,9 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         GetLeaveRequestsTool,
         GetLeaveWaitingStatusTool,
         GetPendingApprovalsTool,
+        GetPendingCancellationsTool,
         RejectLeaveRequestTool,
+        RequestLeaveCancellationTool,
         SubmitLeaveRequestTool,
     )
     from tools.policy import SearchPolicyTool
@@ -115,10 +119,15 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         CancelLeaveRequestTool(data_source),
         GetLeaveWaitingStatusTool(data_source),
         AddCompensatoryDayTool(data_source),
+        RequestLeaveCancellationTool(data_source),
+        ApproveLeaveCancellationTool(data_source),
+        GetPendingCancellationsTool(data_source),
         # Policy search / RAG (1)
         SearchPolicyTool(data_source),
         # Document sensitivity tools (2)
         CheckDocumentSensitivityTool(data_source),
         SensitivityAuditTool(data_source),
+        # Calendar (1)
+        GetTeamCalendarTool(data_source),
     ]
     return ToolRegistry(tools, audit_logger)

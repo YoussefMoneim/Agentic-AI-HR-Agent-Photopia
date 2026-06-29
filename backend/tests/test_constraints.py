@@ -351,3 +351,129 @@ class TestConstraintSettings:
         )
         assert result["active_count"] == 1
         assert result["total_employees"] == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Group 5 — Email link respects constraint engine
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestEmailLinkConstraint:
+
+    def test_email_link_approval_blocked_by_constraint(
+        self, ctx, ds, db_conn, tenant_id, registry, client
+    ):
+        """Email-link approval is blocked when it would breach the 25% concurrent cap.
+        No state change should occur — leave remains pending_approval."""
+        start, end = "2026-09-08", "2026-09-10"  # dates clear of other test windows
+
+        # Approve EMP003 for same dates → active_count=1 in R&D (1/2 = 50% > 25% cap)
+        r3 = _submit_annual_leave(registry, ctx, "EMP003", start, end)
+        assert r3.success, r3.error
+        registry.execute(
+            "approve_leave_request",
+            {"request_id": r3.data["request_id"]},
+            ctx(role="hr_manager", employee_code="EMP002"),
+        )
+
+        # Submit EMP001 for same dates — approving would push R&D to 2/2 = 100%
+        r1 = _submit_annual_leave(registry, ctx, "EMP001", start, end)
+        assert r1.success, r1.error
+        request_id = r1.data["request_id"]
+
+        # Look up the correlation token from the pending_action created at submission
+        with db_conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT pa.correlation_token
+                FROM pending_actions pa
+                JOIN workflow_instances wi ON wi.id = pa.workflow_instance_id
+                WHERE wi.leave_request_id = %s::uuid
+                  AND pa.tenant_id = %s
+                  AND pa.status = 'pending'
+                """,
+                (request_id, tenant_id),
+            )
+            row = cur.fetchone()
+        assert row is not None, "No pending_action found for the submitted leave request"
+        token = row[0]
+
+        # Hit the email-link resolve endpoint as if the manager clicked Approve
+        resp = client.get(f"/api/leave/resolve/{token}?decision=approved")
+
+        # Constraint must have fired — response signals blocked/requires-override, not success
+        assert resp.status_code == 200
+        body = resp.text.lower()
+        assert "requires" in body or "not permitted" in body, (
+            f"Expected constraint message in response, got: {resp.text[:400]}"
+        )
+
+        # Leave status must be unchanged — no state change occurred
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status FROM leave_requests WHERE id = %s::uuid",
+                (request_id,),
+            )
+            status_row = cur.fetchone()
+        assert status_row[0] == "pending_approval", (
+            f"Expected pending_approval after blocked email-link approval, got {status_row[0]}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Working day calculation and weekend submission blocking
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestWorkingDayCalculation:
+    """
+    Tests for count_working_days() utility and submission-time weekend validation.
+    Monday–Friday are working days; Saturday (5) and Sunday (6) are excluded.
+    """
+
+    def test_working_day_calculation_monday_to_friday(self):
+        """Mon–Fri inclusive = 5 working days."""
+        from datetime import date as d
+        from workflow.constraints import count_working_days
+        assert count_working_days(d(2026, 7, 13), d(2026, 7, 17)) == 5  # Mon–Fri
+
+    def test_request_spanning_weekend_counts_correctly(self):
+        """Fri to Wed spans a weekend: Fri + Mon + Tue + Wed = 4, not 6 calendar days."""
+        from datetime import date as d
+        from workflow.constraints import count_working_days
+        # July 17 = Friday, July 18–19 = weekend, July 20–22 = Mon–Wed
+        assert count_working_days(d(2026, 7, 17), d(2026, 7, 22)) == 4
+
+    def test_weekend_only_request_blocked(self, registry, ctx):
+        """Submitting leave for Sat–Sun must be rejected with a working-days error."""
+        result = registry.execute(
+            "submit_leave_request",
+            {
+                "leave_type_code": "sick",
+                "start_date": "2026-07-18",  # Saturday
+                "end_date": "2026-07-19",    # Sunday
+                "reason": "not feeling well",
+            },
+            ctx(role="employee", employee_code="EMP001"),
+        )
+        assert not result.success
+        error = (result.error or "").lower()
+        assert "weekend" in error or "working day" in error
+
+    def test_single_weekend_day_blocked(self, registry, ctx):
+        """A single Saturday produces zero working days and must be rejected."""
+        from datetime import date as d
+        from workflow.constraints import count_working_days
+        assert count_working_days(d(2026, 7, 18), d(2026, 7, 18)) == 0  # Saturday
+
+        result = registry.execute(
+            "submit_leave_request",
+            {
+                "leave_type_code": "sick",
+                "start_date": "2026-07-18",  # Saturday
+                "end_date": "2026-07-18",
+                "reason": "sick",
+            },
+            ctx(role="employee", employee_code="EMP001"),
+        )
+        assert not result.success
+        error = (result.error or "").lower()
+        assert "weekend" in error or "working day" in error

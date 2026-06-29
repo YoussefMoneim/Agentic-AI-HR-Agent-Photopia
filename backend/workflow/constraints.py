@@ -17,11 +17,37 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from data.base import DataSource
     from tools.base import ToolContext
+
+
+def count_working_days(start_date: date, end_date: date) -> int:
+    """
+    Count working days between start and end date inclusive.
+    Working days: Monday through Friday (weekday() 0-4).
+    Saturday (5) and Sunday (6) are excluded.
+    Future: extend to check public_holidays table.
+    """
+    if start_date > end_date:
+        return 0
+    count = 0
+    current = start_date
+    while current <= end_date:
+        if current.weekday() < 5:  # Monday=0, Friday=4
+            count += 1
+        current += timedelta(days=1)
+    return count
+
+
+def get_first_working_day(start_date: date) -> date:
+    """Return start_date if it's a working day, else the next working day."""
+    while start_date.weekday() >= 5:
+        start_date += timedelta(days=1)
+    return start_date
 
 
 @dataclass
