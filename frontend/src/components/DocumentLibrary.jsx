@@ -16,11 +16,32 @@ const ROLE_DISPLAY = {
   admin:      'Admin',
 }
 
-const DOC_TYPE_LABELS = {
-  salary_certificate: 'Salary Certificate',
-  twimc_letter: 'TWIMC Letter',
-  experience_certificate: 'Experience Certificate',
+const SENSITIVITY_LABELS = {
+  salary:      'salary figures',
+  national_id: 'national ID number',
+  medical:     'medical information',
+  performance: 'performance records',
+  financial:   'financial data',
 }
+
+const SAMPLE_TEXTS = [
+  {
+    label: 'Salary + national ID',
+    text: `Employee: Ahmed Hassan\nBasic salary: EGP 45,000 per month\nHousing allowance: EGP 5,000\nNational ID: 29901011234567\nDepartment: Engineering`,
+  },
+  {
+    label: 'Medical report',
+    text: `Sick leave medical report — Dr. Khalid Mansour\nPatient diagnosis: acute respiratory infection\nPrescribed treatment: 5 days rest, antibiotics\nRecommended sick leave: 3 working days`,
+  },
+  {
+    label: 'Clean document',
+    text: `Team meeting agenda — Q3 planning\nTuesday July 8th, 10:00 AM, Conference Room B\nAttendees: Engineering and Product teams\nTopics: roadmap review, sprint planning, retrospective`,
+  },
+  {
+    label: 'Performance record',
+    text: `Performance Improvement Plan — Confidential\nEmployee: Omar Alsayed\nReview period: Q2 2026\nCurrent rating: Partially meets expectations\nManager: Nourhan Hosny — Warning letter issued`,
+  },
+]
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
@@ -54,7 +75,7 @@ const s = {
   },
   btn: (variant = 'primary') => ({
     padding: '8px 16px', borderRadius: 7, fontSize: 13, fontWeight: 600,
-    border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+    fontFamily: 'inherit', cursor: 'pointer',
     background: variant === 'primary' ? '#4f46e5'
       : variant === 'danger' ? '#dc2626'
       : variant === 'ghost' ? 'transparent'
@@ -74,20 +95,18 @@ const s = {
     border: `1px solid ${sensitive ? '#7f1d1d' : '#166534'}`,
     marginBottom: 6,
   }),
+  divider: {
+    borderTop: '1px solid #1a1d2e', margin: '12px 0',
+  },
   warningBox: {
     background: '#2d0f0f', border: '1px solid #7f1d1d', borderRadius: 8,
-    padding: '12px 14px', marginTop: 10, fontSize: 13, color: '#fca5a5',
+    padding: '14px 16px', marginTop: 10, fontSize: 13, color: '#fca5a5',
     lineHeight: 1.5,
   },
   successBox: {
     background: '#0a2a0a', border: '1px solid #166534', borderRadius: 8,
-    padding: '12px 14px', marginTop: 10, fontSize: 13, color: '#86efac',
+    padding: '14px 16px', marginTop: 10, fontSize: 13, color: '#86efac',
     lineHeight: 1.5,
-  },
-  select: {
-    background: '#13151f', border: '1px solid #2a2d40', borderRadius: 7,
-    color: '#e8e8f0', padding: '7px 10px', fontSize: 13, fontFamily: 'inherit',
-    cursor: 'pointer', outline: 'none', marginRight: 8,
   },
   spinner: {
     display: 'inline-block', width: 14, height: 14,
@@ -97,19 +116,19 @@ const s = {
   },
 }
 
-// ── SharePanel — inline share flow for one document card ──────────────────────
+// ── SharePanel — always-visible share flow for one document card ───────────────
 
-const EXTERNAL_VALUE = '__external__'
-
-function SharePanel({ docId, userDisplayName }) {
+function SharePanel({ docId, userDisplayName, sensitivityTypes }) {
   const [employees, setEmployees] = useState([])
   const [loadingPeople, setLoadingPeople] = useState(true)
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState(null) // null | {employee_code, full_name, role} | 'external'
+  const [selected, setSelected] = useState(null) // null | {employee_code, full_name, role, ...} | 'external'
   const [checking, setChecking] = useState(false)
-  const [result, setResult] = useState(null)   // null | {flagged, ...}
+  const [result, setResult] = useState(null)   // null | {flagged, event_id, ...}
   const [decided, setDecided] = useState(null) // null | 'proceeded' | 'cancelled'
   const [deciding, setDeciding] = useState(false)
+  const [sharedAt, setSharedAt] = useState(null)
+  const [externalEmail, setExternalEmail] = useState('')
 
   useEffect(() => {
     listEmployees()
@@ -137,9 +156,10 @@ function SharePanel({ docId, userDisplayName }) {
     setSearch('')
     setResult(null)
     setDecided(null)
+    setExternalEmail('')
   }
 
-  async function handleCheck() {
+  async function handleShare() {
     if (!selected) return
     setChecking(true)
     setResult(null)
@@ -149,7 +169,7 @@ function SharePanel({ docId, userDisplayName }) {
       const data = await checkDocumentShare(docId, {
         recipientEmployeeCode: isExternal ? null : selected.employee_code,
         recipientRole: isExternal ? null : selected.role,
-        recipientName: isExternal ? null : selected.full_name,
+        recipientName: isExternal ? externalEmail : selected.full_name,
       })
       setResult(data)
     } catch (err) {
@@ -164,6 +184,7 @@ function SharePanel({ docId, userDisplayName }) {
     setDeciding(true)
     try {
       await recordShareDecision(result.event_id, decision)
+      if (decision === 'proceeded') setSharedAt(new Date().toLocaleTimeString())
       setDecided(decision)
     } finally {
       setDeciding(false)
@@ -174,32 +195,21 @@ function SharePanel({ docId, userDisplayName }) {
     setSelected(null)
     setResult(null)
     setDecided(null)
+    setSharedAt(null)
+    setExternalEmail('')
   }
 
-  if (decided) {
-    const recipientLabel = selected === 'external'
-      ? 'External recipient'
-      : (selected?.full_name || 'recipient')
-    return (
-      <div style={{ marginTop: 8 }}>
-        {decided === 'proceeded' ? (
-          <div style={s.successBox}>
-            Shared with <strong>{recipientLabel}</strong> — decision logged ✓
-            <div style={{ fontSize: 11, color: '#4ade80', marginTop: 4 }}>
-              Recorded as: <strong>{userDisplayName}</strong>
-            </div>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
-            Sharing cancelled — no action taken.
-          </div>
-        )}
-        <button style={{ ...s.btn('ghost'), marginTop: 8, fontSize: 11 }} onClick={reset}>
-          Share again
-        </button>
-      </div>
-    )
-  }
+  const recipientLabel = selected === 'external'
+    ? (externalEmail || 'External recipient')
+    : (selected?.full_name || '')
+
+  const roleLabel = selected === 'external'
+    ? 'external recipient'
+    : (ROLE_DISPLAY[selected?.role] || selected?.role || '')
+
+  const typesLabel = sensitivityTypes.length > 0
+    ? sensitivityTypes.map(t => SENSITIVITY_LABELS[t] || t).join(', ')
+    : ''
 
   const selectedLabel = selected === 'external'
     ? 'External (outside company)'
@@ -207,107 +217,168 @@ function SharePanel({ docId, userDisplayName }) {
       ? `${selected.full_name} · ${ROLE_DISPLAY[selected.role] || selected.role}`
       : null
 
+  // ── Post-decision states ─────────────────────────────────────────────────────
+
+  if (decided === 'proceeded') {
+    return (
+      <div>
+        <hr style={s.divider} />
+        <div style={s.successBox}>
+          <strong>✓ Shared and logged</strong>
+          <div style={{ marginTop: 6 }}>
+            Shared with <strong>{recipientLabel}</strong> at {sharedAt}
+          </div>
+          <div style={{ fontSize: 11, color: '#4ade80', marginTop: 4 }}>
+            Decision recorded under <strong>{userDisplayName}</strong>
+          </div>
+        </div>
+        <button style={{ ...s.btn('ghost'), marginTop: 8, fontSize: 11 }} onClick={reset}>
+          Share again
+        </button>
+      </div>
+    )
+  }
+
+  // ── Picker + share flow ──────────────────────────────────────────────────────
+
   return (
-    <div style={{ marginTop: 10 }}>
-      {/* People picker */}
-      <div style={{ marginBottom: 8 }}>
-        {selected ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{
-              flex: 1, background: '#1a1d2e', border: '1px solid #2a2d40',
-              borderRadius: 7, padding: '7px 10px', fontSize: 13, color: '#e8e8f0',
-            }}>
-              {selectedLabel}
-            </div>
-            <button style={{ ...s.btn('ghost'), fontSize: 11 }} onClick={reset}>
-              Change
+    <div>
+      <hr style={s.divider} />
+
+      {/* Person selector */}
+      {selected && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <div style={{
+            flex: 1, background: '#1a1d2e', border: '1px solid #2a2d40',
+            borderRadius: 7, padding: '7px 10px', fontSize: 13, color: '#e8e8f0',
+          }}>
+            {selectedLabel}
+          </div>
+          <button style={{ ...s.btn('ghost'), fontSize: 11 }} onClick={reset}>
+            Change
+          </button>
+        </div>
+      )}
+      {selected === 'external' && (
+        <input
+          type="email"
+          style={{ ...s.textarea, minHeight: 'unset', marginTop: 0, marginBottom: 8, padding: '7px 10px', fontSize: 13 }}
+          placeholder="Recipient email address"
+          value={externalEmail}
+          onChange={e => setExternalEmail(e.target.value)}
+          autoFocus
+        />
+      )}
+      {!selected && (
+        <div style={{ marginBottom: 10 }}>
+          <input
+            style={{ ...s.textarea, minHeight: 'unset', marginBottom: 0, padding: '7px 10px', fontSize: 13 }}
+            placeholder={loadingPeople ? 'Loading people…' : 'Search by name or department…'}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            disabled={loadingPeople}
+          />
+          <div style={{
+            background: '#13151f', border: '1px solid #2a2d40', borderRadius: 7,
+            maxHeight: 180, overflowY: 'auto', marginTop: 4,
+          }}>
+            {filtered.map(emp => (
+              <button
+                key={emp.employee_code}
+                onClick={() => selectPerson(emp)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '8px 12px', background: 'transparent', border: 'none',
+                  borderBottom: '1px solid #1a1d2e', cursor: 'pointer',
+                  color: '#e8e8f0', fontFamily: 'inherit', fontSize: 13,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#1a1d2e' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <span style={{ fontWeight: 600 }}>{emp.full_name}</span>
+                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 8 }}>
+                  {ROLE_DISPLAY[emp.role] || emp.role}
+                  {emp.position ? ` · ${emp.position}` : (emp.department ? ` · ${emp.department}` : '')}
+                </span>
+              </button>
+            ))}
+            <button
+              onClick={selectExternal}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '8px 12px', background: 'transparent', border: 'none',
+                cursor: 'pointer', color: '#9ca3af', fontFamily: 'inherit', fontSize: 13,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#1a1d2e' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            >
+              External (outside company)
             </button>
           </div>
-        ) : (
-          <div style={{ position: 'relative' }}>
-            <input
-              style={{ ...s.textarea, minHeight: 'unset', marginBottom: 0, padding: '7px 10px', fontSize: 13 }}
-              placeholder={loadingPeople ? 'Loading people…' : 'Search by name or department…'}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              disabled={loadingPeople}
-            />
-            {(search.trim() || !selected) && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-                background: '#13151f', border: '1px solid #2a2d40', borderRadius: 7,
-                maxHeight: 180, overflowY: 'auto', marginTop: 2,
-              }}>
-                {filtered.map(emp => (
-                  <button
-                    key={emp.employee_code}
-                    onClick={() => selectPerson(emp)}
-                    style={{
-                      display: 'block', width: '100%', textAlign: 'left',
-                      padding: '8px 12px', background: 'transparent', border: 'none',
-                      borderBottom: '1px solid #1a1d2e', cursor: 'pointer',
-                      color: '#e8e8f0', fontFamily: 'inherit', fontSize: 13,
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#1a1d2e' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <span style={{ fontWeight: 600 }}>{emp.full_name}</span>
-                    <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 8 }}>
-                      {ROLE_DISPLAY[emp.role] || emp.role}
-                      {emp.position ? ` · ${emp.position}` : (emp.department ? ` · ${emp.department}` : '')}
-                    </span>
-                  </button>
-                ))}
-                <button
-                  onClick={selectExternal}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left',
-                    padding: '8px 12px', background: 'transparent', border: 'none',
-                    cursor: 'pointer', color: '#9ca3af', fontFamily: 'inherit', fontSize: 13,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#1a1d2e' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  External (outside company)
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {selected && (
-        <button style={s.btn()} onClick={handleCheck} disabled={checking}>
+      {/* Share button — always visible, disabled until a person is selected */}
+      {!result && (
+        <button
+          onClick={selected ? handleShare : undefined}
+          disabled={!selected || checking || (selected === 'external' && !(externalEmail.includes('@') && externalEmail.includes('.')))}
+          style={{
+            ...s.btn(selected ? 'primary' : 'secondary'),
+            opacity: selected ? 1 : 0.45,
+            cursor: selected ? 'pointer' : 'not-allowed',
+            marginTop: 8,
+          }}
+        >
           {checking && <span style={s.spinner} />}
-          {checking ? 'Checking…' : 'Check & Share'}
+          {checking
+            ? 'Sharing…'
+            : selected
+              ? `Share with ${selected === 'external' ? (externalEmail || 'external recipient') : selected.full_name}`
+              : 'Select a person to share'}
         </button>
       )}
 
+      {/* Error */}
       {result?.error && (
         <div style={{ ...s.warningBox, marginTop: 8 }}>Error: {result.error}</div>
       )}
 
+      {/* Clean result */}
       {result && !result.error && !result.flagged && (
         <div style={s.successBox}>
-          Ready to share — no restrictions detected ✓
+          <strong>✓ Safe to share</strong>
+          <div style={{ marginTop: 4, fontSize: 12 }}>
+            No restricted content detected for <strong>{recipientLabel}</strong>
+            {selected !== 'external' && ` (${roleLabel})`}.
+          </div>
         </div>
       )}
 
-      {result?.flagged && (
+      {/* Flagged warning */}
+      {result?.flagged && decided !== 'cancelled' && (
         <div style={s.warningBox}>
-          <strong>⚠ Sensitivity flag</strong>
-          <div style={{ marginTop: 6, lineHeight: 1.5 }}>{result.reason}</div>
-          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <strong>⚠ Heads up before sharing</strong>
+          <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+            This document contains <strong>{typesLabel || 'sensitive information'}</strong>.<br />
+            <strong>{recipientLabel}</strong>{roleLabel ? ` (${roleLabel})` : ''} does not normally
+            have access to this type of information.
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: '#fca5a5' }}>
+            You can still share — but your decision will be permanently logged with your name and the time.
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button
               style={{ ...s.btn('primary'), fontSize: 12 }}
               onClick={() => handleDecide('proceeded')}
               disabled={deciding}
             >
-              Proceed anyway — log my decision
+              {deciding && <span style={s.spinner} />}
+              Proceed anyway — I accept responsibility
             </button>
             <button
               style={{ ...s.btn('ghost'), fontSize: 12 }}
-              onClick={() => handleDecide('cancelled')}
+              onClick={reset}
               disabled={deciding}
             >
               Cancel
@@ -322,41 +393,38 @@ function SharePanel({ docId, userDisplayName }) {
 // ── DemoDocCard — one uploaded/pasted document ────────────────────────────────
 
 function DemoDocCard({ doc, userDisplayName }) {
-  const [expanded, setExpanded] = useState(false)
   const types = Object.keys(doc.sensitivity_scan || {})
+
+  const firstVerdict = Object.values(doc.sensitivity_scan || {})
+    .map(v => v?.llm_verdict)
+    .filter(v => v && v.is_sensitive && v.confidence !== 'low' && v.reason)
+    [0]?.reason
 
   return (
     <div style={s.card}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#e8e8f0', marginBottom: 4, wordBreak: 'break-all' }}>
-            {doc.filename}
-          </div>
-          <div style={s.badge(doc.is_sensitive)}>
-            {doc.is_sensitive
-              ? `Sensitive: ${types.join(', ')}`
-              : 'Clean — no sensitive content'}
-          </div>
-          {doc.is_sensitive && (() => {
-            const firstVerdict = Object.values(doc.sensitivity_scan || {})
-              .map(v => v?.llm_verdict?.reason)
-              .filter(Boolean)[0]
-            return firstVerdict
-              ? <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, lineHeight: 1.4 }}>{firstVerdict}</div>
-              : null
-          })()}
-          <div style={{ fontSize: 11, color: '#4b5563', marginTop: 4 }}>
-            {new Date(doc.created_at).toLocaleString()}
-          </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#e8e8f0', marginBottom: 4, wordBreak: 'break-all' }}>
+          {doc.filename}
         </div>
-        <button
-          style={{ ...s.btn('ghost'), fontSize: 11, whiteSpace: 'nowrap', flexShrink: 0 }}
-          onClick={() => setExpanded(e => !e)}
-        >
-          {expanded ? 'Hide share' : 'Share…'}
-        </button>
+        <div style={s.badge(doc.is_sensitive)}>
+          {doc.is_sensitive
+            ? `⚠ Contains: ${types.map(t => SENSITIVITY_LABELS[t] || t).join(', ')}`
+            : '✓ No sensitive content detected'}
+        </div>
+        {firstVerdict && (
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, lineHeight: 1.4 }}>
+            {firstVerdict}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: '#4b5563', marginTop: 4 }}>
+          {new Date(doc.created_at).toLocaleString()}
+        </div>
       </div>
-      {expanded && <SharePanel docId={doc.id} userDisplayName={userDisplayName} />}
+      <SharePanel
+        docId={doc.id}
+        userDisplayName={userDisplayName}
+        sensitivityTypes={types}
+      />
     </div>
   )
 }
@@ -366,13 +434,14 @@ function DemoDocCard({ doc, userDisplayName }) {
 export default function DocumentLibrary({ user }) {
   const [inputMode, setInputMode] = useState('paste') // 'paste' | 'upload'
   const [pasteText, setPasteText] = useState('')
-  const [pasteFilename, setPasteFilename] = useState('demo-document.txt')
   const [dragOver, setDragOver] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [docs, setDocs] = useState([])
   const [loadingDocs, setLoadingDocs] = useState(true)
   const [resetting, setResetting] = useState(false)
   const fileRef = useRef()
+  const scanDebounceRef = useRef(null)
+  const sampleIndexRef = useRef(0)
 
   const isHR = user && ['hr_staff', 'hr_manager', 'admin'].includes(user.role)
   const displayName = user?.display_name || 'Unknown'
@@ -382,7 +451,7 @@ export default function DocumentLibrary({ user }) {
       const data = await getDemoDocuments()
       setDocs(data.documents || [])
     } catch {
-      // ignore — user might not be logged in yet
+      // ignore
     } finally {
       setLoadingDocs(false)
     }
@@ -390,18 +459,46 @@ export default function DocumentLibrary({ user }) {
 
   useEffect(() => { loadDocs() }, [loadDocs])
 
-  async function handlePaste() {
-    if (!pasteText.trim()) return
-    setScanning(true)
-    try {
-      await pasteDemoDocument(pasteText, pasteFilename || 'pasted-text.txt')
-      setPasteText('')
-      await loadDocs()
-    } catch (err) {
-      alert(err.message)
-    } finally {
-      setScanning(false)
-    }
+  useEffect(() => () => clearTimeout(scanDebounceRef.current), [])
+
+  function handleTrySample() {
+    clearTimeout(scanDebounceRef.current)
+    setPasteText('')
+    const sample = SAMPLE_TEXTS[sampleIndexRef.current % SAMPLE_TEXTS.length]
+    sampleIndexRef.current += 1
+    setTimeout(() => {
+      setPasteText(sample.text)
+      scanDebounceRef.current = setTimeout(async () => {
+        setScanning(true)
+        try {
+          await pasteDemoDocument(sample.text, `${sample.label.toLowerCase().replace(/\s+/g, '-')}.txt`)
+          setPasteText('')
+          await loadDocs()
+        } catch {
+          // silent
+        } finally {
+          setScanning(false)
+        }
+      }, 500)
+    }, 50)
+  }
+
+  function handlePasteChange(value) {
+    setPasteText(value)
+    clearTimeout(scanDebounceRef.current)
+    if (!value.trim()) return
+    scanDebounceRef.current = setTimeout(async () => {
+      setScanning(true)
+      try {
+        await pasteDemoDocument(value, 'pasted-text.txt')
+        setPasteText('')
+        await loadDocs()
+      } catch {
+        // silent during auto-scan
+      } finally {
+        setScanning(false)
+      }
+    }, 500)
   }
 
   async function handleFileUpload(file) {
@@ -441,7 +538,6 @@ export default function DocumentLibrary({ user }) {
     <div style={s.root}>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
-      {/* Section A: Upload & Test */}
       <div style={s.sectionTitle}>Upload & Test</div>
 
       <div style={s.tabRow}>
@@ -455,29 +551,31 @@ export default function DocumentLibrary({ user }) {
 
       {inputMode === 'paste' && (
         <div>
-          <textarea
-            style={s.textarea}
-            placeholder={'Paste document content here…\ne.g. "Basic salary: EGP 45,000. National ID: 29901011234567"'}
-            value={pasteText}
-            onChange={e => setPasteText(e.target.value)}
-            rows={4}
-          />
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-            <input
-              style={{ ...s.textarea, minHeight: 'unset', marginBottom: 0, flex: 1, padding: '7px 10px', fontSize: 12 }}
-              placeholder="Document name (optional)"
-              value={pasteFilename}
-              onChange={e => setPasteFilename(e.target.value)}
-            />
+          <div style={{ position: 'relative' }}>
             <button
-              style={{ ...s.btn(), whiteSpace: 'nowrap' }}
-              onClick={handlePaste}
-              disabled={scanning || !pasteText.trim()}
+              onClick={handleTrySample}
+              style={{
+                position: 'absolute', top: 6, right: 8, zIndex: 1,
+                background: 'none', border: 'none', padding: '2px 4px',
+                color: '#6b7280', fontSize: 11, cursor: 'pointer',
+              }}
+              title={`Next sample: ${SAMPLE_TEXTS[sampleIndexRef.current % SAMPLE_TEXTS.length]?.label}`}
             >
-              {scanning && <span style={s.spinner} />}
-              {scanning ? 'Scanning…' : 'Scan content'}
+              Try sample ↻
             </button>
+            <textarea
+              style={s.textarea}
+              placeholder={'Paste document content here…\ne.g. "Basic salary: EGP 45,000. National ID: 29901011234567"'}
+              value={pasteText}
+              onChange={e => handlePasteChange(e.target.value)}
+              rows={4}
+            />
           </div>
+          {scanning && (
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+              <span style={s.spinner} />Scanning…
+            </div>
+          )}
         </div>
       )}
 
@@ -524,7 +622,7 @@ export default function DocumentLibrary({ user }) {
         </div>
       )}
 
-      {/* Reset button — HR/admin only */}
+      {/* Reset — HR/admin only */}
       {isHR && docs.length > 0 && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #1a1d2e' }}>
           <button

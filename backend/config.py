@@ -77,6 +77,15 @@ EMAIL_LISTENER_POLL_INTERVAL_SECONDS: int = int(
 # Domain used in outgoing Message-ID header: <{pending_action_uuid}@EMAIL_MESSAGE_ID_DOMAIN>
 EMAIL_MESSAGE_ID_DOMAIN: str = os.getenv("EMAIL_MESSAGE_ID_DOMAIN", "hr.fotopia.com")
 
+# ── Odoo sync (write-back) ────────────────────────────────────────────────────
+# Set ODOO_ENABLED=true and fill all four credentials to activate.
+# When disabled, zero Odoo calls are made — fail-safe by design.
+ODOO_URL: str = os.getenv("ODOO_URL", "")
+ODOO_DB: str = os.getenv("ODOO_DB", "")
+ODOO_USERNAME: str = os.getenv("ODOO_USERNAME", "")
+ODOO_PASSWORD: str = os.getenv("ODOO_PASSWORD", "")
+ODOO_ENABLED: bool = os.getenv("ODOO_ENABLED", "false").lower() == "true"
+
 # ── Leave calendar ────────────────────────────────────────────────────────────
 # Egypt's official public holidays for 2026.
 # Islamic holidays (Eid, Islamic New Year, Prophet's Birthday) are lunar-based

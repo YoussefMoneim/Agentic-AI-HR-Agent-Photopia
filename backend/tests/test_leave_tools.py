@@ -524,7 +524,7 @@ class TestApprovalFlow:
         assert pending_after == 0.0
 
     def test_cannot_cancel_already_approved_request(self, ctx, ds):
-        """Cancelling an already-approved request is blocked (only pending_approval is cancellable)."""
+        """Cancelling an already-approved request redirects to request_leave_cancellation."""
         emp_ctx = ctx()
         mgr_ctx = ctx(role="hr_manager", employee_code="EMP002")
         request_id = self._submit_annual(ds, emp_ctx)
@@ -533,7 +533,7 @@ class TestApprovalFlow:
 
         result = CancelLeaveRequestTool(ds).execute({"request_id": request_id}, emp_ctx)
         assert not result.success
-        assert "manager_approved" in result.error or "pending_approval" in result.error
+        assert "request_leave_cancellation" in result.error
 
     def test_cannot_approve_already_approved_request(self, ctx, ds):
         """Double-approving a request returns an error."""

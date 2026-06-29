@@ -19,14 +19,13 @@ const QUICK_ACTIONS = {
 }
 
 const WELCOME = {
-  employee:
-    "Hello Saif! I can check your leave balance, submit leave requests, and generate official documents. What would you like to do?",
-  hr_manager:
-    "Hello Nourhan! I can show pending approvals, look up employee data, and generate official HR documents. What would you like to do?",
+  employee:   (name) => `Hello ${name}! I can check your leave balance, submit leave requests, and generate official documents. What would you like to do?`,
+  hr_manager: (name) => `Hello ${name}! I can show pending approvals, look up employee data, and generate official HR documents. What would you like to do?`,
 }
 
-export default function ChatInterface({ demoRole, onInboxToggle }) {
-  const welcome = WELCOME[demoRole] || WELCOME.hr_manager
+export default function ChatInterface({ demoRole, displayName: fullName, onInboxToggle }) {
+  const displayName = (fullName || '').split(' ')[0] || 'there'
+  const welcome = (WELCOME[demoRole] || WELCOME.hr_manager)(displayName)
   const [messages, setMessages] = useState([
     { id: 0, role: 'agent', text: welcome, documents: [] },
   ])
@@ -87,7 +86,6 @@ export default function ChatInterface({ demoRole, onInboxToggle }) {
     }
   }
 
-  const displayName = demoRole === 'employee' ? 'Saif' : 'Nourhan'
   const actions = QUICK_ACTIONS[demoRole] || QUICK_ACTIONS.hr_manager
 
   return (

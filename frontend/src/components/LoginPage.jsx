@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { login } from '../api.js'
 
 const DEMO_ACCOUNTS = [
-  { email: 'hr.agent.fotopia@gmail.com', label: 'Nourhan Hosny',     role: 'HR Manager',  color: '#c084fc', bg: '#2d1a4e', border: '#4a2878', initials: 'NH' },
-  { email: 'saif.hassan@fotopia.ai',    label: 'Saif Ahmed Hassan', role: 'Employee',    color: '#60a5fa', bg: '#1e3a5f', border: '#2d5086', initials: 'SA' },
-  { email: 'omar.alsayed@fotopia.ai',   label: 'Omar Alsayed',      role: 'Employee',    color: '#60a5fa', bg: '#1e3a5f', border: '#2d5086', initials: 'OA' },
+  { email: 'noura.rashidi@fotopiatech.com', label: 'Noura Al Rashidi', role: 'HR Director',        color: '#c084fc', bg: '#2d1a4e', border: '#4a2878', initials: 'NR' },
+  { email: 'saif.ahmed@fotopiatech.com',    label: 'Saif Ahmed',       role: 'Mobile Engineer',    color: '#60a5fa', bg: '#1e3a5f', border: '#2d5086', initials: 'SA' },
+  { email: 'layla.qassimi@fotopiatech.com', label: 'Layla Al Qassimi', role: 'Data Analyst',       color: '#60a5fa', bg: '#1e3a5f', border: '#2d5086', initials: 'LQ' },
 ]
 
 export default function LoginPage({ onLogin }) {

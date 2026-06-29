@@ -111,6 +111,129 @@ def client():
         yield c
 
 
+@pytest.fixture(scope="session", autouse=True)
+def test_employees(database_url: str):
+    """Create EMP001/EMP002/EMP003 as session-owned test employees.
+    Tests are independent of seed data; this fixture is the authoritative source.
+    Fetches tenant_id directly to avoid scope conflicts with test_auth.py's
+    module-scoped tenant_id fixture."""
+    HASH = "$2b$12$4qFSJ1YZ.CoCCX/TPUU2E.J/gcu4v5wiQz42fxPlwJCI6U7rxjfZO"  # demo123
+    conn = psycopg2.connect(database_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM tenants WHERE slug = 'fotopia'")
+            row = cur.fetchone()
+            if row is None:
+                raise RuntimeError("Fotopia tenant not found. Did seed.sql run?")
+            tenant_id = str(row[0])
+    except Exception:
+        conn.close()
+        raise
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
+                # Insert EMP002 first — it is the manager for EMP001 and EMP003
+                cur.execute("""
+                    INSERT INTO employees (tenant_id, employee_code, full_name, position, department,
+                                          employment_type, start_date, basic_salary, housing_allowance,
+                                          transport_allowance, total_salary, currency, email)
+                    VALUES (%s, 'EMP002', 'Nourhan Hosny', 'HR Project Lead', 'HR',
+                            'Full-time', '2021-06-01', 24000, 3000, 2000, 29000, 'EGP',
+                            'hr.agent.fotopia@gmail.com')
+                    ON CONFLICT (tenant_id, employee_code) DO NOTHING
+                """, (tenant_id,))
+                cur.execute("""
+                    INSERT INTO employees (tenant_id, employee_code, full_name, position, department,
+                                          employment_type, start_date, basic_salary, housing_allowance,
+                                          transport_allowance, total_salary, currency, email)
+                    VALUES (%s, 'EMP001', 'Saif Ahmed Hassan', 'Software Engineer', 'R&D',
+                            'Full-time', '2022-03-15', 20000, 2500, 1500, 24000, 'EGP',
+                            'saif.hassan@fotopia.ai')
+                    ON CONFLICT (tenant_id, employee_code) DO NOTHING
+                """, (tenant_id,))
+                cur.execute("""
+                    INSERT INTO employees (tenant_id, employee_code, full_name, position, department,
+                                          employment_type, start_date, basic_salary, housing_allowance,
+                                          transport_allowance, total_salary, currency, email)
+                    VALUES (%s, 'EMP003', 'Omar Alsayed', 'ML Engineer', 'R&D',
+                            'Full-time', '2023-01-10', 21500, 2500, 2000, 26000, 'EGP',
+                            'omar.alsayed@fotopia.ai')
+                    ON CONFLICT (tenant_id, employee_code) DO NOTHING
+                """, (tenant_id,))
+                # manager_id FK: EMP001 + EMP003 report to EMP002
+                cur.execute("""
+                    UPDATE employees e
+                    SET manager_id = (SELECT id FROM employees WHERE employee_code = 'EMP002' AND tenant_id = e.tenant_id)
+                    WHERE e.employee_code IN ('EMP001', 'EMP003') AND e.tenant_id = %s
+                      AND e.manager_id IS NULL
+                """, (tenant_id,))
+                # Leave balances for 2026
+                for code, days in [("annual", 21.0), ("sick", 90.0), ("compensatory", 0.0)]:
+                    cur.execute("""
+                        INSERT INTO leave_balances
+                            (tenant_id, employee_id, leave_type_id, year, allocated_days, used_days, pending_days)
+                        SELECT e.tenant_id, e.id, lt.id, 2026, %s, 0.0, 0.0
+                        FROM employees e
+                        JOIN leave_types lt ON lt.tenant_id = e.tenant_id AND lt.code = %s
+                        WHERE e.tenant_id = %s AND e.employee_code IN ('EMP001', 'EMP002', 'EMP003')
+                        ON CONFLICT (tenant_id, employee_id, leave_type_id, year) DO NOTHING
+                    """, (days, code, tenant_id))
+                # carry_over_expiry_date for annual leave (March 31, 2026)
+                cur.execute("""
+                    UPDATE leave_balances lb
+                    SET carry_over_expiry_date = '2026-03-31'
+                    FROM employees e, leave_types lt
+                    WHERE lb.employee_id = e.id AND lb.leave_type_id = lt.id
+                      AND e.tenant_id = %s AND e.employee_code IN ('EMP001', 'EMP002', 'EMP003')
+                      AND lt.code = 'annual' AND lb.carry_over_expiry_date IS NULL
+                """, (tenant_id,))
+                # User accounts (needed by auth tests and API login)
+                for emp_code, email, role in [
+                    ("EMP001", "saif.hassan@fotopia.ai", "employee"),
+                    ("EMP002", "hr.agent.fotopia@gmail.com", "hr_manager"),
+                    ("EMP003", "omar.alsayed@fotopia.ai", "employee"),
+                ]:
+                    cur.execute("""
+                        INSERT INTO users (tenant_id, email, full_name, role, employee_id, password_hash)
+                        SELECT e.tenant_id, %s, e.full_name, %s, e.id, %s
+                        FROM employees e
+                        WHERE e.tenant_id = %s AND e.employee_code = %s
+                        ON CONFLICT (tenant_id, email) DO NOTHING
+                    """, (email, role, HASH, tenant_id, emp_code))
+    finally:
+        conn.close()
+
+    yield
+
+    # Teardown: remove test employees and their dependent data cleanly
+    conn = psycopg2.connect(database_url)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
+                cur.execute(
+                    "SELECT id FROM employees WHERE employee_code IN ('EMP001', 'EMP002', 'EMP003') AND tenant_id = %s",
+                    (tenant_id,),
+                )
+                emp_ids = [r[0] for r in cur.fetchall()]
+                if emp_ids:
+                    emp_id_strs = [str(e) for e in emp_ids]
+                    cur.execute("DELETE FROM leave_balances WHERE tenant_id = %s AND employee_id = ANY(%s::uuid[])", (tenant_id, emp_id_strs))
+                    cur.execute("DELETE FROM users WHERE tenant_id = %s AND employee_id = ANY(%s::uuid[])", (tenant_id, emp_id_strs))
+                    # Clear self-referential manager_id before deleting
+                    cur.execute(
+                        "UPDATE employees SET manager_id = NULL WHERE employee_code IN ('EMP001', 'EMP003') AND tenant_id = %s",
+                        (tenant_id,),
+                    )
+                    cur.execute(
+                        "DELETE FROM employees WHERE tenant_id = %s AND employee_code IN ('EMP001', 'EMP002', 'EMP003')",
+                        (tenant_id,),
+                    )
+    finally:
+        conn.close()
+
+
 @pytest.fixture(scope="session")
 def make_jwt(tenant_id: str):
     """Factory that returns a signed JWT for any employee_code + role combo.

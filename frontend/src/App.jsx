@@ -3,6 +3,7 @@ import ChatInterface from './components/ChatInterface.jsx'
 import AuditLog from './components/AuditLog.jsx'
 import ApprovalInbox from './components/ApprovalInbox.jsx'
 import DocumentLibrary from './components/DocumentLibrary.jsx'
+import LeaveCalendar from './components/LeaveCalendar.jsx'
 import LoginPage from './components/LoginPage.jsx'
 import { getStoredUser, logout } from './api.js'
 
@@ -104,6 +105,7 @@ export default function App() {
           {[
             { key: 'audit',     label: 'Audit Log' },
             { key: 'documents', label: 'Documents' },
+            { key: 'calendar',  label: 'Calendar' },
             ...(HR_ROLES.has(user.role) ? [{ key: 'inbox', label: 'Inbox', badge: pendingCount }] : []),
           ].map(tab => (
             <button
@@ -178,7 +180,7 @@ export default function App() {
 
         {/* Chat panel (~60%) */}
         <div style={{ flex: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #1a1d2e' }}>
-          <ChatInterface key={resetKey} demoRole={user.role} onInboxToggle={HR_ROLES.has(user.role) ? () => setRightPanel(p => p === 'inbox' ? 'audit' : 'inbox') : undefined} />
+          <ChatInterface key={resetKey} demoRole={user.role} displayName={user.display_name} onInboxToggle={HR_ROLES.has(user.role) ? () => setRightPanel(p => p === 'inbox' ? 'audit' : 'inbox') : undefined} />
         </div>
 
         {/* Right panel — all three stay mounted; CSS controls visibility */}
@@ -188,6 +190,9 @@ export default function App() {
           </div>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'documents' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'documents' ? 'auto' : 'none' }}>
             <DocumentLibrary user={user} />
+          </div>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'calendar' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'calendar' ? 'auto' : 'none' }}>
+            <LeaveCalendar user={user} />
           </div>
           {HR_ROLES.has(user.role) && (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'inbox' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'inbox' ? 'auto' : 'none' }}>

@@ -8,7 +8,7 @@ from data.base import DataSource
 from services import email as email_svc
 from tools.base import Tool, ToolContext, ToolResult, ToolSpec
 from utils.prompt_security import sanitize_for_html_email, wrap_untrusted_content
-from workflow.constraints import evaluate_constraints
+from workflow.constraints import count_working_days, evaluate_constraints
 from workflow.routing import get_routing_policy
 
 # SECURITY NOTE: Any user-provided text (reason, comment fields) that goes into
@@ -698,6 +698,7 @@ class SubmitLeaveRequestTool(Tool):
         end_datetime = input.get("end_datetime")
         duration_hours = input.get("duration_hours")
         days_requested: float | None = None
+        retroactive_advisory: str | None = None
 
         if is_time_based:
             if start_datetime and end_datetime:
@@ -722,7 +723,17 @@ class SubmitLeaveRequestTool(Tool):
                 return ToolResult(success=False, error="Invalid date format. Use YYYY-MM-DD.")
             if ed < sd:
                 return ToolResult(success=False, error="end_date must be on or after start_date.")
-            days_requested = _calendar_days(sd, ed)
+            days_requested = float(count_working_days(sd, ed))
+            if days_requested == 0:
+                return ToolResult(
+                    success=False,
+                    error="The requested dates fall entirely on weekends. Please select working days (Monday through Friday).",
+                )
+            if sd < _today():
+                retroactive_advisory = (
+                    "This request is for a date in the past. "
+                    "Please confirm this is intentional."
+                )
 
         # Re-run eligibility checks (defense in depth)
         elig_input = {
@@ -854,7 +865,7 @@ class SubmitLeaveRequestTool(Tool):
             "workflow_instance_id": wf["id"],
             "action_type": "email_approval",
             "assigned_to_employee_code": manager["employee_code"],
-            "assigned_to_email": manager["email"],
+            "assigned_to_email": manager.get("notification_email") or manager["email"],
             "correlation_token": correlation_token,
             "context_snapshot": {
                 "employee_code": employee_code,
@@ -874,16 +885,170 @@ class SubmitLeaveRequestTool(Tool):
         )
         # Send approval email — HTML body built separately to avoid XSS
         email_subject = f"Leave Approval Required: {employee['full_name']} — {leave_type['name_en']}"
-        body_html = (
-            f"<p>{employee['full_name']} has requested {leave_type['name_en']} {dates_desc}.</p>"
-            f"<p>Reason: {safe_reason_for_email}</p>"
-            f"<p><a href='{approve_url}'>Approve</a> | <a href='{reject_url}'>Reject</a></p>"
+        submitted_at = datetime.now().strftime("%d %b %Y, %H:%M")
+        duration_cell = (
+            f"{days_requested:.0f} working days"
+            if days_requested is not None
+            else f"{duration_hours} hours"
+        )
+        reason_row = (
+            '<p style="margin:20px 0 0 0;font-size:13px;color:#666666">'
+            f"<strong>Reason:</strong> {safe_reason_for_email}</p>"
+            if safe_reason_for_email and safe_reason_for_email != "Not provided"
+            else ""
+        )
+        body_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#f4f4f7;font-family:Arial,Helvetica,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f7">
+<tr><td align="center" style="padding:30px 15px">
+<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%">
+
+  <!-- HEADER -->
+  <tr>
+    <td style="background-color:#0a0c1a;padding:30px;text-align:center;border-radius:8px 8px 0 0">
+      <div style="color:#ffffff;font-size:22px;font-weight:bold;letter-spacing:1px">Fotopia HR System</div>
+      <div style="color:#c9a84c;font-size:13px;margin-top:6px;letter-spacing:0.5px">WIN Holding Group &mdash; HR Portal</div>
+    </td>
+  </tr>
+
+  <!-- STATUS BANNER -->
+  <tr>
+    <td style="background-color:#c9a84c;padding:14px 20px;text-align:center">
+      <span style="color:#ffffff;font-weight:bold;font-size:15px;letter-spacing:0.5px">&#9889; ACTION REQUIRED &mdash; Leave Approval Request</span>
+    </td>
+  </tr>
+
+  <!-- BODY -->
+  <tr>
+    <td style="background-color:#ffffff;padding:32px 36px">
+
+      <p style="margin:0 0 18px 0;font-size:15px;color:#1a1a2e">Dear {manager['full_name']},</p>
+      <p style="margin:0 0 24px 0;font-size:14px;color:#444444;line-height:1.6">
+        <strong>{employee['full_name']}</strong> has submitted a <strong>{leave_type['name_en']}</strong>
+        request and requires your approval.
+      </p>
+
+      <!-- Details table -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;font-size:14px">
+        <tr style="background-color:#f8f8fb">
+          <td style="padding:11px 16px;color:#666666;width:35%;border-bottom:1px solid #e0e0e0">Employee</td>
+          <td style="padding:11px 16px;color:#1a1a2e;font-weight:600;border-bottom:1px solid #e0e0e0">
+            {employee['full_name']} ({employee['employee_code']})
+          </td>
+        </tr>
+        <tr style="background-color:#ffffff">
+          <td style="padding:11px 16px;color:#666666;border-bottom:1px solid #e0e0e0">Leave Type</td>
+          <td style="padding:11px 16px;color:#1a1a2e;font-weight:600;border-bottom:1px solid #e0e0e0">
+            {leave_type['name_en']}
+          </td>
+        </tr>
+        <tr style="background-color:#f8f8fb">
+          <td style="padding:11px 16px;color:#666666;border-bottom:1px solid #e0e0e0">From</td>
+          <td style="padding:11px 16px;color:#1a1a2e;font-weight:600;border-bottom:1px solid #e0e0e0">
+            {start_date or '&mdash;'}
+          </td>
+        </tr>
+        <tr style="background-color:#ffffff">
+          <td style="padding:11px 16px;color:#666666;border-bottom:1px solid #e0e0e0">To</td>
+          <td style="padding:11px 16px;color:#1a1a2e;font-weight:600;border-bottom:1px solid #e0e0e0">
+            {end_date or '&mdash;'}
+          </td>
+        </tr>
+        <tr style="background-color:#f8f8fb">
+          <td style="padding:11px 16px;color:#666666;border-bottom:1px solid #e0e0e0">Duration</td>
+          <td style="padding:11px 16px;color:#1a1a2e;font-weight:600;border-bottom:1px solid #e0e0e0">
+            {duration_cell}
+          </td>
+        </tr>
+        <tr style="background-color:#ffffff">
+          <td style="padding:11px 16px;color:#666666">Submitted</td>
+          <td style="padding:11px 16px;color:#1a1a2e;font-weight:600">{submitted_at}</td>
+        </tr>
+      </table>
+
+      {reason_row}
+
+      <!-- Approve / Reject buttons -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px">
+        <tr>
+          <td width="48%" align="center">
+            <a href="{approve_url}"
+               style="display:inline-block;background-color:#16a34a;color:#ffffff;text-decoration:none;
+                      font-weight:bold;font-size:15px;padding:14px 32px;border-radius:6px;
+                      letter-spacing:0.3px">
+              &#10003;&nbsp; Approve
+            </a>
+          </td>
+          <td width="4%"></td>
+          <td width="48%" align="center">
+            <a href="{reject_url}"
+               style="display:inline-block;background-color:#dc2626;color:#ffffff;text-decoration:none;
+                      font-weight:bold;font-size:15px;padding:14px 32px;border-radius:6px;
+                      letter-spacing:0.3px">
+              &#10007;&nbsp; Reject
+            </a>
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin:24px 0 4px 0;font-size:12px;color:#888888;text-align:center">
+        Or reply to this email with &ldquo;Approved&rdquo; or &ldquo;Rejected&rdquo;
+      </p>
+      <p style="margin:0;font-size:11px;color:#bbbbbb;text-align:center">
+        Reply-Token: {outbound_message_id}
+      </p>
+
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="background-color:#0a0c1a;padding:20px 30px;text-align:center;border-radius:0 0 8px 8px">
+      <p style="margin:0 0 6px 0;color:#aaaaaa;font-size:12px">
+        Fotopia HR System &mdash; Automated message. Do not forward.
+        Questions: <a href="mailto:hr@fotopia.com" style="color:#c9a84c;text-decoration:none">hr@fotopia.com</a>
+      </p>
+      <p style="margin:0;color:#666666;font-size:11px">
+        This email contains confidential HR information intended only for the named recipient.
+        If received in error, please delete immediately.
+      </p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+        body_plain = (
+            f"ACTION REQUIRED — Leave Approval Request\n"
+            f"{'=' * 44}\n\n"
+            f"Dear {manager['full_name']},\n\n"
+            f"{employee['full_name']} ({employee['employee_code']}) has submitted a "
+            f"{leave_type['name_en']} request and requires your approval.\n\n"
+            f"  Employee  : {employee['full_name']} ({employee['employee_code']})\n"
+            f"  Leave Type: {leave_type['name_en']}\n"
+            f"  From      : {start_date or 'N/A'}\n"
+            f"  To        : {end_date or 'N/A'}\n"
+            f"  Duration  : {duration_cell}\n"
+            f"  Submitted : {submitted_at}\n"
+            f"  Reason    : {input.get('reason') or 'Not provided'}\n\n"
+            f"APPROVE: {approve_url}\n"
+            f"REJECT:  {reject_url}\n\n"
+            f"Or reply to this email with 'Approved' or 'Rejected'.\n"
+            f"Reply-Token: {outbound_message_id}\n\n"
+            f"---\n"
+            f"Fotopia HR System — Automated message. Questions: hr@fotopia.com\n"
+            f"Confidential — intended only for the named recipient."
         )
         email_svc.send_email(
-            to_email=manager["email"],
+            to_email=manager.get("notification_email") or manager["email"],
             subject=email_subject,
             body_html=body_html,
-            body_plain=prompt_text + f"\n\nReply-Token: {outbound_message_id}",
+            body_plain=body_plain,
             message_id=outbound_message_id,
         )
 
@@ -911,6 +1076,7 @@ class SubmitLeaveRequestTool(Tool):
                 "manager_email": manager["email"],
                 "status": "pending_approval",
                 "message": submission_message,
+                "advisory": retroactive_advisory,
             },
             data_fields_accessed=["employee_id", "manager_id", "leave_balance"],
             action_type="data_write",
@@ -1171,6 +1337,28 @@ class ApproveLeaveRequestTool(Tool):
                 body_plain=f"Your {lr['leave_type_name']} request ({date_info}) has been approved by your manager.",
             )
 
+        # Odoo sync — non-blocking, never rolls back the approval
+        try:
+            import logging as _odoo_log
+            from services.odoo_sync import sync_approved_leave
+            _odoo_email = employee.get("email") if employee else None
+            if _odoo_email:
+                _odoo = sync_approved_leave(
+                    employee_email=_odoo_email,
+                    leave_type_code=lr.get("leave_type_code", ""),
+                    start_date=str(lr.get("start_date", "")),
+                    end_date=str(lr.get("end_date", "")),
+                    reason=lr.get("reason"),
+                    our_request_id=request_id,
+                )
+                if not _odoo.get("skipped") and not _odoo.get("synced"):
+                    _odoo_log.getLogger(__name__).warning(
+                        "Odoo sync failed (non-blocking): %s", _odoo.get("error")
+                    )
+        except Exception as _odoo_err:
+            import logging as _odoo_log
+            _odoo_log.getLogger(__name__).error("Odoo sync exception (non-blocking): %s", _odoo_err)
+
         return ToolResult(
             success=True,
             data={
@@ -1357,6 +1545,16 @@ class CancelLeaveRequestTool(Tool):
         decision = can_access(ctx, "cancel_leave", {"request_employee_code": lr.get("employee_code")})
         if not decision.allowed:
             return ToolResult(success=False, error=decision.reason)
+
+        if lr["status"] in ("manager_approved", "hr_approved"):
+            return ToolResult(
+                success=False,
+                error=(
+                    "This leave is already approved and cannot be withdrawn here. "
+                    "Use 'request_leave_cancellation' instead — HR will process it "
+                    "and restore your balance for any unused days."
+                ),
+            )
 
         if lr["status"] != "pending_approval":
             return ToolResult(
@@ -1565,4 +1763,249 @@ class AddCompensatoryDayTool(Tool):
             },
             data_fields_accessed=["leave_balance", "allocated_days"],
             action_type="data_write",
+        )
+
+
+# ─── Tool 11: request_leave_cancellation ──────────────────────────────────────
+
+class RequestLeaveCancellationTool(Tool):
+    spec = ToolSpec(
+        name="request_leave_cancellation",
+        description=(
+            "Request cancellation of an already-approved leave request "
+            "(status must be manager_approved or hr_approved). "
+            "Employees can only cancel their own leave. HR can cancel any. "
+            "HR will review the request and restore the balance for any unused days. "
+            "If the leave has already started, only unconsumed days will be restored."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "description": "The leave request UUID to cancel.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Optional reason for cancellation (e.g. plans changed, returned early).",
+                },
+            },
+            "required": ["request_id"],
+        },
+        allowed_roles=["employee", "hr_staff", "hr_manager", "admin"],
+    )
+
+    def __init__(self, data_source: DataSource) -> None:
+        self._ds = data_source
+
+    def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        request_id = input.get("request_id", "").strip()
+        reason = input.get("reason", "").strip() or None
+
+        if not request_id:
+            return ToolResult(success=False, error="request_id is required.")
+
+        lr = self._ds.get_leave_request_by_id(ctx.tenant_id, request_id)
+        if not lr:
+            return ToolResult(success=False, error=f"Leave request {request_id} not found.")
+
+        decision = can_access(
+            ctx,
+            "request_leave_cancellation",
+            {"request_employee_code": lr.get("employee_code")},
+        )
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
+
+        employee = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code)
+        requesting_employee_id = employee["id"] if employee else ctx.user_id
+
+        result = self._ds.request_leave_cancellation(
+            ctx.tenant_id, request_id, requesting_employee_id, reason
+        )
+        if not result.get("success"):
+            return ToolResult(success=False, error=result.get("error", "Cancellation request failed."))
+
+        return ToolResult(
+            success=True,
+            data={
+                **result,
+                "message": (
+                    f"Cancellation request submitted for your {result.get('leave_type', 'leave')} "
+                    f"({result.get('start_date')} to {result.get('end_date')}). "
+                    "HR will review it and restore your balance for any unused days."
+                ),
+            },
+            action_type="data_write",
+        )
+
+
+# ─── Tool 12: approve_leave_cancellation ──────────────────────────────────────
+
+class ApproveLeaveCancellationTool(Tool):
+    spec = ToolSpec(
+        name="approve_leave_cancellation",
+        description=(
+            "Approve a pending leave cancellation request. HR use only. "
+            "The balance is restored automatically: "
+            "if the leave hasn't started, all days are restored; "
+            "if it's in progress, specify consumed_days so only the remaining days are restored; "
+            "if the leave already ended, no days are restored. "
+            "Providing consumed_days overrides the date-based calculation."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "description": "The leave request UUID whose cancellation to approve.",
+                },
+                "consumed_days": {
+                    "type": "number",
+                    "description": (
+                        "Days already taken if the leave was in progress. "
+                        "Leave blank if the leave hasn't started yet (full restore will happen automatically)."
+                    ),
+                },
+            },
+            "required": ["request_id"],
+        },
+        allowed_roles=["hr_staff", "hr_manager", "admin"],
+    )
+
+    def __init__(self, data_source: DataSource) -> None:
+        self._ds = data_source
+
+    def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        request_id = input.get("request_id", "").strip()
+        consumed_days = input.get("consumed_days")
+
+        if not request_id:
+            return ToolResult(success=False, error="request_id is required.")
+
+        if consumed_days is not None:
+            try:
+                consumed_days = float(consumed_days)
+                if consumed_days < 0:
+                    return ToolResult(success=False, error="consumed_days cannot be negative.")
+            except (TypeError, ValueError):
+                return ToolResult(success=False, error="consumed_days must be a number.")
+
+        decision = can_access(ctx, "approve_leave_cancellation", {})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
+
+        employee = self._ds.get_employee_by_code(ctx.tenant_id, ctx.employee_code)
+        decided_by_id = employee["id"] if employee else ctx.user_id
+
+        result = self._ds.approve_leave_cancellation(
+            ctx.tenant_id, request_id, decided_by_id, consumed_days
+        )
+        if not result.get("success"):
+            return ToolResult(success=False, error=result.get("error", "Cancellation approval failed."))
+
+        # Notify employee
+        emp_email = result.get("employee_email")
+        if emp_email:
+            leave_type_name = result.get("leave_type", "leave")
+            start_date = result.get("start_date", "")
+            end_date = result.get("end_date", "")
+            days_restored_n = result.get("days_restored", 0)
+            emp_name = result.get("employee_name", "Employee")
+            day_word = "day" if days_restored_n == 1 else "days"
+            has_word = "has" if days_restored_n == 1 else "have"
+            body_plain = (
+                f"Dear {emp_name},\n\n"
+                f"Your cancellation request for {leave_type_name} "
+                f"({start_date} to {end_date}) has been approved by HR.\n"
+                f"{days_restored_n:.0f} {day_word} {has_word} been restored to your leave balance.\n\n"
+                f"Fotopia HR System"
+            )
+            body_html = (
+                '<html><body style="font-family:Arial,sans-serif;background:#f4f4f7;margin:0;padding:20px">'
+                '<div style="max-width:480px;margin:0 auto">'
+                '<div style="background:#0a0c1a;padding:16px 24px;border-radius:8px 8px 0 0;text-align:center">'
+                '<div style="color:#fff;font-size:16px;font-weight:bold">Fotopia HR System</div>'
+                '<div style="color:#c9a84c;font-size:11px;margin-top:4px">WIN Holding Group</div>'
+                "</div>"
+                '<div style="background:#fff;padding:32px 28px;border-radius:0 0 8px 8px">'
+                '<div style="font-size:36px;text-align:center;margin-bottom:16px">&#10003;</div>'
+                '<h2 style="margin:0 0 8px 0;color:#16a34a;font-size:20px;text-align:center">Cancellation Approved</h2>'
+                f'<p style="margin:0 0 20px 0;color:#555;font-size:14px;line-height:1.6;text-align:center">'
+                f"Dear {emp_name}, your leave cancellation has been approved by HR.</p>"
+                '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:20px">'
+                '<tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Leave Type</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{leave_type_name}</td>'
+                "</tr><tr>"
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Period</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{start_date} &rarr; {end_date}</td>'
+                '</tr><tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666">Days Restored</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#16a34a">{days_restored_n:.0f} {day_word}</td>'
+                "</tr></table>"
+                '<p style="margin:0;font-size:11px;color:#aaa;text-align:center">Fotopia HR System &mdash; Automated notification</p>'
+                "</div></div></body></html>"
+            )
+            email_svc.send_email(
+                to_email=emp_email,
+                subject=f"Leave Cancellation Approved — {leave_type_name}",
+                body_html=body_html,
+                body_plain=body_plain,
+            )
+
+        days_restored = result.get("days_restored", 0)
+        return ToolResult(
+            success=True,
+            data={
+                **result,
+                "message": (
+                    f"Cancellation approved for {result.get('employee_name', 'the employee')}'s "
+                    f"{result.get('leave_type', 'leave')}. "
+                    + (
+                        f"{days_restored:.1f} day{'s' if days_restored != 1 else ''} restored to their balance."
+                        if days_restored > 0
+                        else "No days restored (leave was fully consumed or already ended)."
+                    )
+                ),
+            },
+            action_type="data_write",
+        )
+
+
+# ─── Tool 13: get_pending_cancellations ───────────────────────────────────────
+
+class GetPendingCancellationsTool(Tool):
+    spec = ToolSpec(
+        name="get_pending_cancellations",
+        description=(
+            "Get all leave requests that are pending HR cancellation approval. "
+            "Shows employee name, leave type, original dates, days requested, "
+            "cancellation reason, and how long the request has been waiting. "
+            "HR use only."
+        ),
+        input_schema={"type": "object", "properties": {}},
+        allowed_roles=["hr_staff", "hr_manager", "admin"],
+    )
+
+    def __init__(self, data_source: DataSource) -> None:
+        self._ds = data_source
+
+    def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        decision = can_access(ctx, "view_pending_cancellations", {})
+        if not decision.allowed:
+            return ToolResult(success=False, error=decision.reason)
+
+        items = self._ds.get_pending_cancellations(ctx.tenant_id)
+        return ToolResult(
+            success=True,
+            data={
+                "pending_cancellations": items,
+                "count": len(items),
+                "message": (
+                    f"{len(items)} leave cancellation{'s' if len(items) != 1 else ''} pending your review."
+                    if items else "No pending cancellation requests."
+                ),
+            },
+            action_type="data_read",
         )

@@ -312,7 +312,7 @@ class PostgreSQLDataSource(DataSource):
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT mgr.id, mgr.employee_code, mgr.full_name, mgr.email
+                    SELECT mgr.id, mgr.employee_code, mgr.full_name, mgr.email, mgr.notification_email
                     FROM employees e
                     JOIN employees mgr ON mgr.id = e.manager_id
                     WHERE e.tenant_id = %s
@@ -346,17 +346,28 @@ class PostgreSQLDataSource(DataSource):
                            e.full_name AS employee_name,
                            e.employee_code,
                            lt.name_en AS leave_type_name,
+                           lr.id         AS leave_request_id,
                            lr.start_date,
                            lr.end_date,
                            lr.days_requested,
                            lr.reason,
-                           lr.status AS request_status
+                           lr.submitted_at,
+                           lr.status AS request_status,
+                           COALESCE(lb.allocated_days, 0)
+                             + COALESCE(lb.carry_over_days, 0)
+                             - COALESCE(lb.used_days, 0)
+                             - COALESCE(lb.pending_days, 0) AS balance_remaining
                     FROM pending_actions pa
                     JOIN workflow_instances wi ON wi.id = pa.workflow_instance_id
                     JOIN employees approver ON approver.id = pa.assigned_to_employee_id
                     LEFT JOIN leave_requests lr ON lr.id = wi.leave_request_id::uuid
                     LEFT JOIN employees e ON e.id = wi.subject_employee_id
                     LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+                    LEFT JOIN leave_balances lb
+                           ON lb.employee_id   = e.id
+                          AND lb.leave_type_id = lr.leave_type_id
+                          AND lb.year          = EXTRACT(YEAR FROM lr.start_date)::int
+                          AND lb.tenant_id     = pa.tenant_id
                     WHERE pa.tenant_id = %s
                       AND approver.employee_code = %s
                       AND pa.status = 'pending'
@@ -368,11 +379,14 @@ class PostgreSQLDataSource(DataSource):
                 for row in cur.fetchall():
                     r = dict(row)
                     r["id"] = str(r["id"])
+                    r["leave_request_id"] = str(r["leave_request_id"]) if r.get("leave_request_id") else None
                     r["start_date"] = _isodate(r.get("start_date"))
                     r["end_date"] = _isodate(r.get("end_date"))
                     r["sent_at"] = _isodate(r.get("sent_at"))
                     r["deadline_at"] = _isodate(r.get("deadline_at"))
+                    r["submitted_at"] = _isodate(r.get("submitted_at"))
                     r["days_requested"] = _float(r.get("days_requested"))
+                    r["balance_remaining"] = _float(r.get("balance_remaining"))
                     rows.append(r)
                 return rows
         finally:
@@ -898,7 +912,7 @@ class PostgreSQLDataSource(DataSource):
                       AND lr.employee_id = %s::uuid
                       AND lt.code = %s
                       AND lr.status NOT IN (
-                          'manager_rejected', 'hr_rejected', 'cancelled', 'withdrawn'
+                          'manager_rejected', 'hr_rejected', 'cancelled', 'withdrawn', 'cancellation_pending'
                       )
                     """,
                     (tenant_id, employee_id, leave_type_code),
@@ -980,6 +994,45 @@ class PostgreSQLDataSource(DataSource):
                 return r
         finally:
             self._release(conn)
+
+    def get_leave_request_by_token(self, tenant_id: str, correlation_token: str) -> dict | None:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT wi.leave_request_id,
+                           approver.employee_code AS approver_employee_code,
+                           u.role                 AS approver_role
+                    FROM pending_actions pa
+                    JOIN workflow_instances wi ON wi.id = pa.workflow_instance_id
+                    LEFT JOIN employees approver
+                           ON approver.id = pa.assigned_to_employee_id
+                    LEFT JOIN users u
+                           ON u.employee_id = pa.assigned_to_employee_id
+                          AND u.tenant_id = pa.tenant_id
+                    WHERE pa.tenant_id = %s
+                      AND pa.correlation_token = %s
+                      AND pa.status = 'pending'
+                    """,
+                    (tenant_id, correlation_token),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                approver_employee_code = row["approver_employee_code"]
+                approver_role = row["approver_role"] or "hr_manager"
+                leave_request_id = str(row["leave_request_id"])
+        finally:
+            self._release(conn)
+
+        lr = self.get_leave_request_by_id(tenant_id, leave_request_id)
+        if lr is None:
+            return None
+        lr["approver_employee_code"] = approver_employee_code
+        lr["approver_role"] = approver_role
+        return lr
 
     def get_leave_requests_for_employee(
         self,
@@ -1437,6 +1490,370 @@ class PostgreSQLDataSource(DataSource):
                         """,
                         (decision, event_id, tenant_id),
                     )
+        finally:
+            self._release(conn)
+
+    # ─── Leave: cancellation methods ──────────────────────────────────────────
+
+    def request_leave_cancellation(
+        self,
+        tenant_id: str,
+        leave_request_id: str,
+        requesting_employee_id: str,
+        reason: str | None,
+    ) -> dict:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT lr.id, lr.status, lr.days_requested,
+                               lr.start_date, lr.end_date,
+                               e.full_name AS employee_name,
+                               lt.name_en AS leave_type_name,
+                               lt.deducts_balance, lt.id AS leave_type_id,
+                               lr.employee_id
+                        FROM leave_requests lr
+                        JOIN employees e ON e.id = lr.employee_id
+                        JOIN leave_types lt ON lt.id = lr.leave_type_id
+                        WHERE lr.tenant_id = %s AND lr.id = %s::uuid
+                        FOR UPDATE
+                        """,
+                        (tenant_id, leave_request_id),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        return {"success": False, "error": "Leave request not found."}
+                    if row["status"] not in ("manager_approved", "hr_approved"):
+                        return {
+                            "success": False,
+                            "error": (
+                                f"Cannot request cancellation — current status is '{row['status']}'. "
+                                "Only manager_approved or hr_approved requests can be cancelled this way."
+                            ),
+                        }
+
+                    cur.execute(
+                        """
+                        UPDATE leave_requests
+                        SET status = 'cancellation_pending',
+                            cancellation_requested_at = now(),
+                            cancellation_requested_by_id = %s::uuid,
+                            cancellation_reason = %s,
+                            updated_at = now()
+                        WHERE tenant_id = %s AND id = %s::uuid
+                        """,
+                        (requesting_employee_id, reason, tenant_id, leave_request_id),
+                    )
+
+                    return {
+                        "success": True,
+                        "leave_request_id": leave_request_id,
+                        "employee_name": row["employee_name"],
+                        "leave_type": row["leave_type_name"],
+                        "start_date": _isodate(row["start_date"]),
+                        "end_date": _isodate(row["end_date"]),
+                        "days_requested": _float(row["days_requested"]),
+                    }
+        finally:
+            self._release(conn)
+
+    def approve_leave_cancellation(
+        self,
+        tenant_id: str,
+        leave_request_id: str,
+        decided_by_employee_id: str,
+        consumed_days: float | None,
+    ) -> dict:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT lr.id, lr.status, lr.days_requested,
+                               lr.start_date, lr.end_date,
+                               lr.employee_id, lr.leave_type_id,
+                               e.full_name AS employee_name,
+                               e.employee_code, e.email AS employee_email,
+                               lt.name_en AS leave_type_name,
+                               lt.deducts_balance
+                        FROM leave_requests lr
+                        JOIN employees e ON e.id = lr.employee_id
+                        JOIN leave_types lt ON lt.id = lr.leave_type_id
+                        WHERE lr.tenant_id = %s AND lr.id = %s::uuid
+                        FOR UPDATE
+                        """,
+                        (tenant_id, leave_request_id),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        return {"success": False, "error": "Leave request not found."}
+                    if row["status"] != "cancellation_pending":
+                        return {
+                            "success": False,
+                            "error": f"Cannot approve cancellation — current status is '{row['status']}'.",
+                        }
+
+                    days_requested = _float(row["days_requested"]) or 0.0
+                    today = date.today()
+                    start = row["start_date"]
+                    end = row["end_date"]
+
+                    if consumed_days is not None:
+                        days_to_restore = days_requested - float(consumed_days)
+                    elif start is not None and start > today:
+                        days_to_restore = days_requested
+                    elif end is not None and end < today:
+                        days_to_restore = 0.0
+                    else:
+                        days_to_restore = 0.0
+
+                    days_to_restore = max(0.0, days_to_restore)
+
+                    cur.execute(
+                        """
+                        UPDATE leave_requests
+                        SET status = 'cancelled',
+                            cancellation_decided_at = now(),
+                            cancellation_decided_by_id = %s::uuid,
+                            consumed_days = %s,
+                            updated_at = now()
+                        WHERE tenant_id = %s AND id = %s::uuid
+                        """,
+                        (
+                            decided_by_employee_id,
+                            float(consumed_days) if consumed_days is not None else None,
+                            tenant_id,
+                            leave_request_id,
+                        ),
+                    )
+
+                    new_used_days = None
+                    if row["deducts_balance"] and days_to_restore > 0 and start is not None:
+                        year = start.year
+                        cur.execute(
+                            """
+                            UPDATE leave_balances
+                            SET used_days = GREATEST(0, used_days - %s),
+                                updated_at = now()
+                            WHERE tenant_id = %s
+                              AND employee_id = %s::uuid
+                              AND leave_type_id = %s::uuid
+                              AND year = %s
+                            RETURNING used_days
+                            """,
+                            (
+                                days_to_restore,
+                                tenant_id,
+                                str(row["employee_id"]),
+                                str(row["leave_type_id"]),
+                                year,
+                            ),
+                        )
+                        bal_row = cur.fetchone()
+                        new_used_days = _float(bal_row["used_days"]) if bal_row else None
+
+                    return {
+                        "success": True,
+                        "days_restored": days_to_restore,
+                        "new_used_days": new_used_days,
+                        "employee_name": row["employee_name"],
+                        "employee_code": row["employee_code"],
+                        "employee_email": row["employee_email"],
+                        "start_date": str(row["start_date"]) if row["start_date"] else None,
+                        "end_date": str(row["end_date"]) if row["end_date"] else None,
+                        "leave_type": row["leave_type_name"],
+                    }
+        finally:
+            self._release(conn)
+
+    def get_pending_cancellations(self, tenant_id: str) -> list[dict]:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT lr.id,
+                           e.full_name AS employee_name,
+                           e.employee_code,
+                           lt.name_en AS leave_type_name,
+                           lr.start_date,
+                           lr.end_date,
+                           lr.days_requested,
+                           lr.cancellation_reason,
+                           lr.cancellation_requested_at
+                    FROM leave_requests lr
+                    JOIN employees e ON e.id = lr.employee_id
+                    JOIN leave_types lt ON lt.id = lr.leave_type_id
+                    WHERE lr.tenant_id = %s
+                      AND lr.status = 'cancellation_pending'
+                    ORDER BY lr.cancellation_requested_at ASC
+                    """,
+                    (tenant_id,),
+                )
+                rows = []
+                for row in cur.fetchall():
+                    r = dict(row)
+                    r["id"] = str(r["id"])
+                    r["start_date"] = _isodate(r.get("start_date"))
+                    r["end_date"] = _isodate(r.get("end_date"))
+                    r["cancellation_requested_at"] = _isodate(r.get("cancellation_requested_at"))
+                    r["days_requested"] = _float(r.get("days_requested"))
+                    rows.append(r)
+                return rows
+        finally:
+            self._release(conn)
+
+    def get_team_calendar(
+        self,
+        tenant_id: str,
+        caller_role: str,
+        caller_employee_id: str,
+        year: int,
+        month: int,
+        department: str | None = None,
+    ) -> dict:
+        from calendar import monthrange
+        from datetime import date as _date
+
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+
+                # A — Events scope: which employee IDs to show as clickable events
+                if caller_role == "employee":
+                    # Employee sees only their own events
+                    events_scope_ids = [caller_employee_id] if caller_employee_id else []
+                elif caller_role == "manager":
+                    cur.execute(
+                        "SELECT id FROM employees WHERE tenant_id = %s AND manager_id = %s::uuid",
+                        (tenant_id, caller_employee_id),
+                    )
+                    events_scope_ids = [str(r["id"]) for r in cur.fetchall()]
+                else:
+                    # hr_staff / hr_manager / admin
+                    if department:
+                        cur.execute(
+                            "SELECT id FROM employees WHERE tenant_id = %s AND department = %s",
+                            (tenant_id, department),
+                        )
+                    else:
+                        cur.execute(
+                            "SELECT id FROM employees WHERE tenant_id = %s",
+                            (tenant_id,),
+                        )
+                    events_scope_ids = [str(r["id"]) for r in cur.fetchall()]
+
+                # B — Summary scope: all employees in tenant (or dept) for daily counts
+                if department:
+                    cur.execute(
+                        "SELECT id FROM employees WHERE tenant_id = %s AND department = %s",
+                        (tenant_id, department),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT id FROM employees WHERE tenant_id = %s",
+                        (tenant_id,),
+                    )
+                summary_scope_ids = [str(r["id"]) for r in cur.fetchall()]
+
+                # C — Fetch leave events for the month
+                _, days_in_month = monthrange(year, month)
+                month_start = _date(year, month, 1)
+                month_end = _date(year, month, days_in_month)
+
+                ACTIVE_STATUSES = (
+                    "pending_approval", "pending_top_of_hierarchy",
+                    "manager_approved", "hr_approved", "cancellation_pending",
+                )
+
+                def _fetch_events(scope_ids: list[str]) -> list[dict]:
+                    if not scope_ids:
+                        return []
+                    cur.execute(
+                        """
+                        SELECT lr.id,
+                               lr.employee_id,
+                               e.full_name,
+                               e.employee_code,
+                               e.department,
+                               lt.code AS leave_type_code,
+                               lt.name_en AS leave_type_label,
+                               lr.start_date,
+                               lr.end_date,
+                               lr.status
+                        FROM leave_requests lr
+                        JOIN employees e  ON e.id = lr.employee_id  AND e.tenant_id = lr.tenant_id
+                        JOIN leave_types lt ON lt.id = lr.leave_type_id AND lt.tenant_id = lr.tenant_id
+                        WHERE lr.tenant_id = %s
+                          AND lr.employee_id = ANY(%s::uuid[])
+                          AND lr.status = ANY(%s)
+                          AND lr.start_date <= %s
+                          AND lr.end_date   >= %s
+                        ORDER BY lr.start_date
+                        """,
+                        (tenant_id, scope_ids, list(ACTIVE_STATUSES), month_end, month_start),
+                    )
+                    return cur.fetchall()
+
+                events_rows = _fetch_events(events_scope_ids)
+                summary_rows = _fetch_events(summary_scope_ids)
+
+                # D — Build events list with privacy rule
+                caller_id_str = caller_employee_id or ""
+                events = []
+                for row in events_rows:
+                    is_own = (str(row["employee_id"]) == caller_id_str)
+                    show = (caller_role != "employee") or is_own
+                    events.append({
+                        "employee_name":    row["full_name"]        if show else None,
+                        "employee_code":    row["employee_code"]    if show else None,
+                        "leave_type_code":  row["leave_type_code"]  if show else None,
+                        "leave_type_label": row["leave_type_label"] if show else None,
+                        "start_date":       row["start_date"].isoformat(),
+                        "end_date":         row["end_date"].isoformat(),
+                        "status":           row["status"],
+                        "department":       row["department"],
+                        "is_own":           is_own,
+                    })
+
+                # E — Build daily_summary from summary-scope events
+                total_employees = len(summary_scope_ids)
+                daily_summary = {}
+                for day in range(1, days_in_month + 1):
+                    d = _date(year, month, day)
+                    count = sum(
+                        1 for row in summary_rows
+                        if row["start_date"] <= d <= row["end_date"]
+                    )
+                    pct = (count / total_employees * 100) if total_employees > 0 else 0.0
+                    daily_summary[d.isoformat()] = {
+                        "on_leave_count": count,
+                        "total_employees": total_employees,
+                        "percentage": round(pct, 1),
+                        "over_threshold": pct > 25.0,
+                    }
+
+                # F — Departments list
+                cur.execute(
+                    "SELECT DISTINCT department FROM employees "
+                    "WHERE tenant_id = %s AND department IS NOT NULL ORDER BY department",
+                    (tenant_id,),
+                )
+                departments = [r["department"] for r in cur.fetchall()]
+
+                return {
+                    "events": events,
+                    "daily_summary": daily_summary,
+                    "departments": departments,
+                    "total_employees_in_scope": total_employees,
+                }
         finally:
             self._release(conn)
 

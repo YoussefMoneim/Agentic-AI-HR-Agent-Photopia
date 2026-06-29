@@ -61,6 +61,11 @@ CREATE TABLE employees (
     currency TEXT DEFAULT 'EGP',
     annual_leave_balance INTEGER DEFAULT 0,  -- deprecated: superseded by leave_balances table
     email TEXT,
+    notification_email TEXT,         -- if set, approval notifications go here instead of email
+    gender TEXT,
+    national_id TEXT,
+    phone_number TEXT,
+    employment_status TEXT NOT NULL DEFAULT 'active',
     manager_name TEXT,       -- legacy free-text; manager_id FK is authoritative
     manager_id UUID REFERENCES employees(id),  -- direct manager; self-referential FK
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -174,8 +179,19 @@ CREATE TABLE leave_requests (
             'pending_top_of_hierarchy',
             'manager_approved', 'manager_rejected',
             'hr_approved', 'hr_rejected',
+            'cancellation_pending',
             'cancelled', 'withdrawn', 'completed'
         )),
+
+    -- Cancellation tracking (populated when employee requests cancellation of an approved leave)
+    cancellation_requested_at    TIMESTAMPTZ,
+    cancellation_reason          TEXT,
+    cancellation_requested_by_id UUID REFERENCES employees(id),
+    cancellation_decided_at      TIMESTAMPTZ,
+    cancellation_decided_by_id   UUID REFERENCES employees(id),
+    cancellation_reject_reason   TEXT,
+    consumed_days                NUMERIC(5,1),
+    -- consumed_days: HR fills when leave was in progress. days_restored = days_requested - consumed_days.
 
     -- Legacy fields — kept for resolve_pending_action compatibility
     resolved_by UUID REFERENCES employees(id),
@@ -198,6 +214,9 @@ CREATE INDEX idx_leave_requests_tenant ON leave_requests(tenant_id, status, subm
 CREATE INDEX idx_leave_requests_employee ON leave_requests(tenant_id, employee_id, status);
 CREATE INDEX idx_leave_requests_manager ON leave_requests(tenant_id, manager_id, status);
 CREATE INDEX ON leave_requests(workflow_instance_id) WHERE workflow_instance_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_leave_requests_cancellation_pending
+    ON leave_requests(tenant_id, cancellation_requested_at)
+    WHERE status = 'cancellation_pending';
 
 -- ─── Leave policies ───────────────────────────────────────────────────────────
 -- One row per (tenant, leave_type). Flat model — no JSONB rules.
