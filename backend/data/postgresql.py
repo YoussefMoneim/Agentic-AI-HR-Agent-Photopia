@@ -1895,3 +1895,135 @@ class PostgreSQLDataSource(DataSource):
                 return [dict(r) for r in cur.fetchall()]
         finally:
             self._release(conn)
+
+    # ─── Email agent ──────────────────────────────────────────────────────────
+
+    def get_employee_by_email(self, tenant_id: str, email: str) -> dict | None:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT e.id, e.employee_code, e.full_name, e.email,
+                           e.notification_email, e.department, e.position,
+                           COALESCE(u.role, 'employee') AS role
+                    FROM employees e
+                    LEFT JOIN users u ON u.tenant_id = e.tenant_id
+                        AND LOWER(u.email) = LOWER(e.email)
+                    WHERE e.tenant_id = %s AND LOWER(e.email) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    (tenant_id, email.strip()),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                r = dict(row)
+                r["id"] = str(r["id"]) if r.get("id") else None
+                return r
+        finally:
+            self._release(conn)
+
+    def check_and_record_rate_limit(
+        self,
+        tenant_id: str,
+        sender_email: str,
+        max_per_hour: int = 5,
+        block_minutes: int = 60,
+    ) -> dict:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            sender = sender_email.strip().lower()
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT request_count, blocked_until, window_start
+                    FROM email_agent_rate_limit
+                    WHERE tenant_id = %s AND sender_email = %s
+                    """,
+                    (tenant_id, sender),
+                )
+                row = cur.fetchone()
+
+                if row is None:
+                    cur.execute(
+                        """
+                        INSERT INTO email_agent_rate_limit
+                            (tenant_id, sender_email, window_start, request_count)
+                        VALUES (%s, %s, NOW(), 1)
+                        """,
+                        (tenant_id, sender),
+                    )
+                    conn.commit()
+                    return {"allowed": True, "count": 1, "blocked_until": None}
+
+                row = dict(row)
+
+                # Check if still in an active block
+                if row.get("blocked_until"):
+                    cur.execute(
+                        "SELECT NOW() < %s AS still_blocked",
+                        (row["blocked_until"],),
+                    )
+                    check = cur.fetchone()
+                    if check and check["still_blocked"]:
+                        return {
+                            "allowed": False,
+                            "count": row["request_count"],
+                            "blocked_until": str(row["blocked_until"]),
+                        }
+
+                # Check if the 1-hour window has expired
+                cur.execute(
+                    "SELECT %s < NOW() - INTERVAL '1 hour' AS expired",
+                    (row["window_start"],),
+                )
+                window_expired = cur.fetchone()["expired"]
+
+                if window_expired:
+                    cur.execute(
+                        """
+                        UPDATE email_agent_rate_limit
+                        SET request_count = 1, window_start = NOW(), blocked_until = NULL
+                        WHERE tenant_id = %s AND sender_email = %s
+                        """,
+                        (tenant_id, sender),
+                    )
+                    conn.commit()
+                    return {"allowed": True, "count": 1, "blocked_until": None}
+
+                # Increment within current window
+                new_count = row["request_count"] + 1
+                if new_count > max_per_hour:
+                    cur.execute(
+                        """
+                        UPDATE email_agent_rate_limit
+                        SET request_count = request_count + 1,
+                            blocked_until = NOW() + %s * INTERVAL '1 minute'
+                        WHERE tenant_id = %s AND sender_email = %s
+                        RETURNING blocked_until
+                        """,
+                        (block_minutes, tenant_id, sender),
+                    )
+                    result = dict(cur.fetchone())
+                    conn.commit()
+                    return {
+                        "allowed": False,
+                        "count": new_count,
+                        "blocked_until": str(result["blocked_until"]),
+                    }
+
+                cur.execute(
+                    """
+                    UPDATE email_agent_rate_limit
+                    SET request_count = request_count + 1, blocked_until = NULL
+                    WHERE tenant_id = %s AND sender_email = %s
+                    """,
+                    (tenant_id, sender),
+                )
+                conn.commit()
+                return {"allowed": True, "count": new_count, "blocked_until": None}
+        finally:
+            self._release(conn)

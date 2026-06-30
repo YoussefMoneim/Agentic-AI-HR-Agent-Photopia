@@ -25,6 +25,7 @@ def send_email(
     body_html: str,
     body_plain: str,
     message_id: str | None = None,
+    in_reply_to: str | None = None,
 ) -> bool:
     """Send an email. Returns True on success, False on send failure."""
 
@@ -34,12 +35,12 @@ def send_email(
 
     # ── Path 2: SMTP (smtplib, stdlib) ───────────────────────────────────────
     if config.SMTP_HOST and config.SMTP_USERNAME and config.SMTP_PASSWORD:
-        return _send_via_smtp(to_email, subject, body_html, body_plain, message_id)
+        return _send_via_smtp(to_email, subject, body_html, body_plain, message_id, in_reply_to)
 
     # ── Path 3: Mock (log only) ───────────────────────────────────────────────
     _log.info(
-        "EMAIL [mock] TO=%s | SUBJECT=%s | MESSAGE-ID=%s\n%s",
-        to_email, subject, message_id or "(none)", body_plain,
+        "EMAIL [mock] TO=%s | SUBJECT=%s | MESSAGE-ID=%s | IN-REPLY-TO=%s\n%s",
+        to_email, subject, message_id or "(none)", in_reply_to or "(none)", body_plain,
     )
     return True
 
@@ -88,6 +89,7 @@ def _send_via_smtp(
     body_html: str,
     body_plain: str,
     message_id: str | None,
+    in_reply_to: str | None = None,
 ) -> bool:
     try:
         msg = MIMEMultipart("alternative")
@@ -96,6 +98,9 @@ def _send_via_smtp(
         msg["To"] = to_email
         if message_id:
             msg["Message-ID"] = message_id
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
+            msg["References"] = in_reply_to
 
         # Plain first, HTML last — RFC 2046 preference order (most capable client uses last)
         msg.attach(MIMEText(body_plain, "plain", "utf-8"))

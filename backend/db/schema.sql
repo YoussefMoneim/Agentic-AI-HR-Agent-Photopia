@@ -441,3 +441,22 @@ CREATE POLICY tenant_isolation ON demo_documents FOR ALL
     WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON demo_documents TO fotopia_app;
+
+-- Email agent rate-limit table.
+-- Tracks inbound email volume per sender. Loop detection fires before this is touched.
+CREATE TABLE IF NOT EXISTS email_agent_rate_limit (
+    id              BIGSERIAL PRIMARY KEY,
+    tenant_id       UUID NOT NULL REFERENCES tenants(id),
+    sender_email    TEXT NOT NULL,
+    window_start    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    request_count   INT NOT NULL DEFAULT 1,
+    blocked_until   TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, sender_email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_earl_tenant_sender
+    ON email_agent_rate_limit(tenant_id, sender_email);
+
+GRANT SELECT, INSERT, UPDATE ON email_agent_rate_limit TO fotopia_app;
+GRANT USAGE, SELECT ON SEQUENCE email_agent_rate_limit_id_seq TO fotopia_app;

@@ -361,3 +361,24 @@ class DataSource(ABC):
         Pre-filters allowed_roles && caller_roles BEFORE text search — never post-filter.
         classified_at IS NOT NULL guard ensures quarantine chunks are never returned.
         Returns list of {document_id, chunk_index, content, source_file, sensitivity}."""
+
+    # ─── Email agent ──────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def get_employee_by_email(self, tenant_id: str, email: str) -> dict | None:
+        """Return employee row matching work email (case-insensitive), or None.
+        Joins users to get the authoritative role (defaults to 'employee' if no user record).
+        Returns: {id, employee_code, full_name, email, notification_email,
+                  department, position, role}"""
+
+    @abstractmethod
+    def check_and_record_rate_limit(
+        self,
+        tenant_id: str,
+        sender_email: str,
+        max_per_hour: int = 5,
+        block_minutes: int = 60,
+    ) -> dict:
+        """Check and record rate limit for sender in email_agent_rate_limit.
+        Returns: {"allowed": bool, "count": int, "blocked_until": str | None}
+        Resets window after 1 hour. Blocks sender for block_minutes when count > max_per_hour."""
