@@ -339,6 +339,7 @@ def _process_imap_message(
         return
 
     in_reply_to = msg.get("In-Reply-To", "").strip() or None
+    message_id = msg.get("Message-ID", "").strip() or None
     body_text = _extract_body(msg)
 
     _log.debug(
@@ -346,13 +347,26 @@ def _process_imap_message(
         msg_id, from_email, in_reply_to, len(body_text),
     )
 
-    process_inbound_email(
+    resolution = process_inbound_email(
         ds=ds,
         tenant_id=tenant_id,
         from_email=from_email,
         in_reply_to=in_reply_to,
         body_text=body_text,
     )
+
+    if not resolution.get("resolved"):
+        from services.email_agent import process_employee_email  # noqa: PLC0415
+        msg_headers = {k.lower(): v for k, v in msg.items()}
+        process_employee_email(
+            ds=ds,
+            tenant_id=tenant_id,
+            from_email=from_email,
+            body_text=body_text,
+            in_reply_to_message_id=in_reply_to,
+            our_message_id=message_id,
+            msg_headers=msg_headers,
+        )
 
     # Always mark Seen — even on parse failure — to prevent infinite retry
     imap.store(msg_id, "+FLAGS", "\\Seen")
