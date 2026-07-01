@@ -25,6 +25,12 @@ echo "║        Fotopia HR — Full Demo Reset              ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 
+# ── Pre-cleanup: remove stale containers from old project name ─────────────────
+# The project was previously named 'fotopia-hr-agent'; those containers still
+# hold ports 8000/5432 and are invisible to 'docker compose down'.
+echo "=== Pre-cleanup: removing stale containers from old project name ==="
+docker rm -f fotopia-hr-agent-backend-1 fotopia-hr-agent-db-1 2>/dev/null || true
+
 # ── Step 1: Tear down volumes and restart ──────────────────────────────────────
 echo "=== Step 1/5: Tear down Docker volumes and restart ==="
 docker compose down -v
@@ -50,6 +56,17 @@ if [ "$ready" -eq 0 ]; then
     exit 1
 fi
 
+# ── Apply DB migrations (not in schema.sql; must run on every fresh volume) ───
+echo ""
+echo "=== Applying database migrations ==="
+for migration in backend/db/migrations/*.sql; do
+    name="$(basename "$migration")"
+    docker exec -i fotopia-hr-agent-db-1 psql -U fotopia -d fotopia_hr \
+        < "$migration" > /dev/null 2>&1 \
+        && echo "  ✓ $name" \
+        || echo "  ~ $name (skipped or already applied)"
+done
+
 # ── Step 2: Clear Odoo leave/allocation records and reseed allocations ─────────
 echo ""
 echo "=== Step 2/5: Clear Odoo demo data and reseed allocations ==="
@@ -69,8 +86,11 @@ import psycopg2, config
 conn = psycopg2.connect(config.DATABASE_URL)
 conn.autocommit = True
 with conn.cursor() as cur:
-    cur.execute('DELETE FROM email_agent_rate_limit')
-    print(f'  Cleared email_agent_rate_limit ({cur.rowcount} rows)')
+    try:
+        cur.execute('DELETE FROM email_agent_rate_limit')
+        print(f'  Cleared email_agent_rate_limit ({cur.rowcount} rows)')
+    except Exception as e:
+        print(f'  email_agent_rate_limit not found — skipping')
 conn.close()
 "
 
