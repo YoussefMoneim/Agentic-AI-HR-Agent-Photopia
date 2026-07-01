@@ -53,8 +53,6 @@ fi
 # ── Step 2: Clear Odoo leave/allocation records and reseed allocations ─────────
 echo ""
 echo "=== Step 2/5: Clear Odoo demo data and reseed allocations ==="
-docker cp backend/scripts/clear_odoo_demo_data.py \
-    fotopia-hr-agent-backend-1:/app/scripts/clear_odoo_demo_data.py
 docker exec fotopia-hr-agent-backend-1 python /app/scripts/clear_odoo_demo_data.py
 
 # ── Step 3: Sync employees to Odoo ────────────────────────────────────────────
