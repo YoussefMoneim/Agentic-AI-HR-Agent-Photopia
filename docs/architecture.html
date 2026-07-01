@@ -76,11 +76,7 @@
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-    header p {
-      color: var(--text-2);
-      font-size: 0.95rem;
-      margin-top: 0.5rem;
-    }
+    header p { color: var(--text-2); font-size: 0.95rem; margin-top: 0.5rem; }
     .header-meta {
       display: flex;
       justify-content: center;
@@ -88,10 +84,7 @@
       margin-top: 1.5rem;
       flex-wrap: wrap;
     }
-    .header-meta span {
-      font-size: 0.78rem;
-      color: var(--text-3);
-    }
+    .header-meta span { font-size: 0.78rem; color: var(--text-3); }
     .header-meta strong { color: var(--text-2); font-weight: 500; }
 
     /* ── Tabs ────────────────────────────────────────────────── */
@@ -101,26 +94,23 @@
       background: var(--bg-card);
       border-bottom: 1px solid var(--border);
       overflow-x: auto;
-      padding: 0 1.5rem;
       position: sticky;
       top: 0;
       z-index: 100;
     }
-    .tabs-bar::-webkit-scrollbar { display: none; }
     .tab-btn {
-      padding: 0.85rem 1.25rem;
+      flex: none;
+      padding: 0.85rem 1.35rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-2);
       font-size: 0.82rem;
       font-weight: 500;
-      color: var(--text-2);
       cursor: pointer;
-      border: none;
-      background: none;
-      border-bottom: 2px solid transparent;
       white-space: nowrap;
       transition: color 0.15s, border-color 0.15s;
-      display: flex;
-      align-items: center;
-      gap: 0.45rem;
+      font-family: inherit;
     }
     .tab-btn .icon { font-size: 1rem; opacity: 0.7; }
     .tab-btn:hover { color: var(--text-1); }
@@ -134,18 +124,14 @@
     .tab-pane { display: none; }
     .tab-pane.active { display: block; }
 
-    /* ── Section header ──────────────────────────────────────── */
     .section-header { margin-bottom: 1.75rem; }
     .section-header h2 {
-      font-size: 1.5rem;
+      font-size: 1.45rem;
       font-weight: 700;
       letter-spacing: -0.02em;
+      color: var(--text-1);
     }
-    .section-header p {
-      color: var(--text-2);
-      font-size: 0.88rem;
-      margin-top: 0.35rem;
-    }
+    .section-header p { color: var(--text-2); font-size: 0.88rem; margin-top: 0.3rem; }
 
     /* ── Cards ───────────────────────────────────────────────── */
     .card {
@@ -156,200 +142,230 @@
       margin-bottom: 1.25rem;
     }
     .card h3 {
-      font-size: 1rem;
+      font-size: 0.95rem;
       font-weight: 600;
-      margin-bottom: 0.9rem;
+      margin-bottom: 1rem;
       display: flex;
       align-items: center;
       gap: 0.5rem;
     }
-    .card h3 .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
-    /* ── Grid layouts ────────────────────────────────────────── */
+    /* ── Grids ───────────────────────────────────────────────── */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
-    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
-    @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
 
-    /* ── Tags / badges ───────────────────────────────────────── */
+    /* ── Layer Stack ─────────────────────────────────────────── */
+    .layer-stack { display: flex; flex-direction: column; gap: 0.6rem; }
+    .layer {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+    }
+    .layer-num {
+      flex-shrink: 0;
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.8rem; font-weight: 700;
+    }
+    .layer-body { flex: 1; min-width: 0; }
+    .layer-body strong { font-size: 0.9rem; display: block; margin-bottom: 0.25rem; }
+    .layer-body p { font-size: 0.8rem; color: var(--text-2); margin-bottom: 0.4rem; }
+    .layer-status { flex-shrink: 0; }
+
+    /* ── Tags / Pills ────────────────────────────────────────── */
     .tag {
       display: inline-block;
-      background: var(--tag-bg);
-      border: 1px solid var(--border);
-      color: var(--text-2);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.72rem;
-      padding: 0.15rem 0.5rem;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.55rem;
       border-radius: 4px;
-      margin: 0.15rem;
+      background: var(--tag-bg);
+      color: var(--text-2);
+      margin: 0.15rem 0.15rem 0 0;
     }
-    .tag.blue   { background: rgba(37,99,235,0.12);  border-color: rgba(59,130,246,0.3);  color: #93c5fd; }
-    .tag.green  { background: rgba(34,197,94,0.10);  border-color: rgba(34,197,94,0.3);   color: #86efac; }
-    .tag.yellow { background: rgba(234,179,8,0.10);  border-color: rgba(234,179,8,0.3);   color: #fde047; }
-    .tag.purple { background: rgba(168,85,247,0.10); border-color: rgba(168,85,247,0.3);  color: #d8b4fe; }
-    .tag.cyan   { background: rgba(6,182,212,0.10);  border-color: rgba(6,182,212,0.3);   color: #67e8f9; }
-    .tag.orange { background: rgba(249,115,22,0.10); border-color: rgba(249,115,22,0.3);  color: #fdba74; }
-    .tag.red    { background: rgba(239,68,68,0.10);  border-color: rgba(239,68,68,0.3);   color: #fca5a5; }
+    .tag.blue   { background: rgba(37,99,235,0.15);  color: #93c5fd; }
+    .tag.green  { background: rgba(34,197,94,0.12);  color: #86efac; }
+    .tag.yellow { background: rgba(234,179,8,0.12);  color: #fde047; }
+    .tag.purple { background: rgba(168,85,247,0.12); color: #d8b4fe; }
+    .tag.cyan   { background: rgba(6,182,212,0.12);  color: #67e8f9; }
+    .tag.orange { background: rgba(249,115,22,0.12); color: #fdba74; }
+    .tag.red    { background: rgba(239,68,68,0.12);  color: #fca5a5; }
 
-    /* ── Mermaid wrapper ─────────────────────────────────────── */
+    .pill {
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 0.2rem 0.65rem;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .pill.live    { background: rgba(34,197,94,0.15);  color: #4ade80;  border: 1px solid rgba(34,197,94,0.3); }
+    .pill.planned { background: rgba(107,114,128,0.15); color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
+    .pill.ready   { background: rgba(234,179,8,0.15);  color: #fbbf24; border: 1px solid rgba(234,179,8,0.3); }
+    .pill.inprog  { background: rgba(37,99,235,0.15);  color: #60a5fa; border: 1px solid rgba(37,99,235,0.3); }
+
+    /* ── Security items ──────────────────────────────────────── */
+    .security-item {
+      display: flex;
+      gap: 0.85rem;
+      padding: 0.85rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .security-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .security-item .icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 0.1rem; }
+    .security-item h4 { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.2rem; }
+    .security-item p  { font-size: 0.8rem; color: var(--text-2); }
+
+    /* ── Tables ──────────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; padding: 0.6rem 0.75rem; color: var(--text-2); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    td { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    code { font-family: 'JetBrains Mono', monospace; font-size: 0.8em; background: rgba(255,255,255,0.08); padding: 0.1em 0.35em; border-radius: 3px; }
+
+    /* ── Version rows ────────────────────────────────────────── */
+    .version-row {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid rgba(48,54,61,0.6);
+      font-size: 0.82rem;
+    }
+    .version-row:last-of-type { border-bottom: none; }
+    .lib { color: var(--text-1); flex: 1; min-width: 0; }
+    .ver { color: var(--accent-hi); font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; white-space: nowrap; }
+    .role { color: var(--text-3); font-size: 0.75rem; white-space: nowrap; }
+
+    /* ── Mermaid wrap ────────────────────────────────────────── */
     .mermaid-wrap {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 2rem 1.5rem;
-      overflow-x: auto;
+      padding: 1.5rem;
       margin-bottom: 1.25rem;
+      overflow-x: auto;
     }
-    .mermaid-wrap .mermaid { min-width: 600px; }
-
-    /* ── Tables ──────────────────────────────────────────────── */
-    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    th {
-      text-align: left;
-      padding: 0.65rem 1rem;
-      background: var(--bg-card2);
-      color: var(--text-2);
-      font-weight: 600;
+    .diagram-label {
       font-size: 0.75rem;
-      letter-spacing: 0.06em;
+      font-weight: 600;
       text-transform: uppercase;
-      border-bottom: 1px solid var(--border);
+      letter-spacing: 0.1em;
+      color: var(--text-3);
+      margin-bottom: 1rem;
     }
-    td {
-      padding: 0.7rem 1rem;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-    }
-    tr:last-child td { border-bottom: none; }
-    tr:hover td { background: rgba(255,255,255,0.02); }
-    td code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.78rem;
-      background: var(--tag-bg);
-      border: 1px solid var(--border);
-      padding: 0.1rem 0.35rem;
-      border-radius: 3px;
-      color: #93c5fd;
-    }
-
-    /* ── Status pills ────────────────────────────────────────── */
-    .pill {
-      display: inline-block;
-      padding: 0.2rem 0.65rem;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-    }
-    .pill.live    { background: rgba(34,197,94,0.15);  color: #86efac; border: 1px solid rgba(34,197,94,0.25); }
-    .pill.ready   { background: rgba(234,179,8,0.15);  color: #fde047; border: 1px solid rgba(234,179,8,0.25); }
-    .pill.planned { background: rgba(107,114,128,0.2); color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
-
-    /* ── Security columns ────────────────────────────────────── */
-    .security-item {
-      display: flex;
-      gap: 0.75rem;
-      padding: 0.7rem 0;
-      border-bottom: 1px solid var(--border);
-    }
-    .security-item:last-child { border-bottom: none; }
-    .security-item .icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.1rem; }
-    .security-item h4 { font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem; }
-    .security-item p  { font-size: 0.8rem; color: var(--text-2); }
-
-    /* ── Layer stack ─────────────────────────────────────────── */
-    .layer-stack { display: flex; flex-direction: column; gap: 0.5rem; }
-    .layer {
-      border-radius: 8px;
-      padding: 0.75rem 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      border: 1px solid var(--border);
-    }
-    .layer-num {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.7rem;
-      font-weight: 600;
-      width: 28px; height: 28px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-    .layer-body { flex: 1; }
-    .layer-body strong { font-size: 0.88rem; font-weight: 600; }
-    .layer-body p { font-size: 0.78rem; color: var(--text-2); margin-top: 0.1rem; }
-    .layer-status { margin-left: auto; }
-
-    /* ── Version list ────────────────────────────────────────── */
-    .version-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.5rem 0;
-      border-bottom: 1px solid var(--border);
-      font-size: 0.83rem;
-    }
-    .version-row:last-child { border-bottom: none; }
-    .version-row .lib  { color: var(--text-1); font-weight: 500; }
-    .version-row .ver  { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #86efac; }
-    .version-row .role { font-size: 0.75rem; color: var(--text-3); max-width: 200px; text-align: right; }
-
-    /* ── Hardware ────────────────────────────────────────────── */
-    .hw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
-    @media (max-width: 700px) { .hw-grid { grid-template-columns: 1fr; } }
-    .hw-card {
-      background: var(--bg-card2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.25rem;
-    }
-    .hw-card h4 {
-      color: var(--text-2);
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      font-size: 0.73rem;
-      font-weight: 600;
-      margin-bottom: 0.85rem;
-    }
-    .hw-row {
-      display: flex;
-      gap: 0.75rem;
-      align-items: flex-start;
-      padding: 0.4rem 0;
-      font-size: 0.83rem;
-      border-bottom: 1px solid var(--border);
-    }
-    .hw-row:last-child { border-bottom: none; }
-    .hw-row .hw-label { color: var(--text-2); width: 110px; flex-shrink: 0; font-size: 0.78rem; }
-    .hw-row .hw-val   { color: var(--text-1); font-weight: 500; }
 
     /* ── Footnote ────────────────────────────────────────────── */
-    .footnote {
-      font-size: 0.75rem;
-      color: var(--text-3);
-      margin-top: 0.6rem;
-      padding-left: 0.75rem;
-      border-left: 2px solid var(--border);
+    .footnote { font-size: 0.78rem; color: var(--text-3); }
+
+    /* ── Hardware ────────────────────────────────────────────── */
+    .hw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+    .hw-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+    .hw-card h4 { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.85rem; color: var(--text-1); }
+    .hw-row { display: flex; gap: 1rem; padding: 0.35rem 0; font-size: 0.8rem; border-bottom: 1px solid rgba(48,54,61,0.5); }
+    .hw-row:last-child { border-bottom: none; }
+    .hw-label { color: var(--text-3); width: 80px; flex-shrink: 0; }
+    .hw-val { color: var(--text-1); }
+
+    /* ── Business value tab ──────────────────────────────────── */
+    .hero-statement {
+      background: linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(168,85,247,0.08) 100%);
+      border: 1px solid rgba(37,99,235,0.25);
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+      text-align: center;
+    }
+    .hero-statement h3 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--text-1);
+      margin-bottom: 0.6rem;
+      letter-spacing: -0.02em;
+    }
+    .hero-statement p { font-size: 0.9rem; color: var(--text-2); max-width: 640px; margin: 0 auto; }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.25rem; }
+    .metric-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      text-align: center;
+    }
+    .metric-num { font-size: 2rem; font-weight: 700; color: var(--accent-hi); letter-spacing: -0.03em; }
+    .metric-label { font-size: 0.75rem; color: var(--text-2); margin-top: 0.25rem; }
+
+    .capability-list { list-style: none; }
+    .capability-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.65rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .capability-list li:last-child { border-bottom: none; }
+    .capability-list .cap-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
+    .capability-list strong { color: var(--text-1); display: block; margin-bottom: 0.1rem; }
+    .capability-list span { color: var(--text-2); font-size: 0.8rem; }
+
+    /* ── Roadmap tab ─────────────────────────────────────────── */
+    .roadmap-grid { display: flex; flex-direction: column; gap: 0.85rem; margin-bottom: 1.5rem; }
+    .roadmap-phase {
+      display: grid;
+      grid-template-columns: 140px 1fr auto;
+      align-items: start;
+      gap: 1.25rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+    }
+    .roadmap-phase.active-phase { border-color: rgba(37,99,235,0.4); background: linear-gradient(90deg, rgba(37,99,235,0.06) 0%, var(--bg-card) 100%); }
+    .roadmap-phase.done-phase   { border-color: rgba(34,197,94,0.3);  background: linear-gradient(90deg, rgba(34,197,94,0.04) 0%, var(--bg-card) 100%); }
+    .phase-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 0.2rem; }
+    .phase-name  { font-size: 0.95rem; font-weight: 700; color: var(--text-1); }
+    .phase-items { font-size: 0.8rem; color: var(--text-2); }
+    .phase-items li { padding: 0.18rem 0; list-style: none; display: flex; align-items: flex-start; gap: 0.5rem; }
+    .phase-items li::before { content: '—'; color: var(--text-3); flex-shrink: 0; }
+
+    .vision-card {
+      background: linear-gradient(135deg, rgba(168,85,247,0.1) 0%, rgba(37,99,235,0.08) 100%);
+      border: 1px solid rgba(168,85,247,0.25);
+      border-radius: 12px;
+      padding: 1.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .vision-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.85rem; }
+    .vision-card p  { font-size: 0.85rem; color: var(--text-2); }
+
+    .agent-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 1.25rem; }
+    .agent-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .agent-card .agent-icon { font-size: 1.75rem; margin-bottom: 0.5rem; }
+    .agent-card .agent-name { font-size: 0.82rem; font-weight: 600; color: var(--text-1); }
+    .agent-card .agent-status { font-size: 0.7rem; color: var(--text-3); margin-top: 0.2rem; }
+
+    /* ── Responsive ──────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .grid-2, .grid-3, .hw-grid, .metric-grid { grid-template-columns: 1fr; }
+      .agent-cards { grid-template-columns: 1fr 1fr; }
+      .roadmap-phase { grid-template-columns: 1fr; }
+      header h1 { font-size: 1.6rem; }
+      .content { padding: 1.25rem 1rem 3rem; }
     }
 
-    /* ── Cred status ─────────────────────────────────────────── */
-    .cred-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      display: inline-block;
-      margin-right: 0.3rem;
-    }
-    .cred-dot.live    { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .cred-dot.ready   { background: var(--yellow); }
-    .cred-dot.planned { background: var(--text-3); }
-
-    /* ── Print ───────────────────────────────────────────────── */
     @media print {
       .tabs-bar { position: static; }
       .tab-pane { display: block !important; page-break-before: always; }
@@ -359,82 +375,270 @@
 </head>
 <body>
 
-<!-- ══════════════════════════════════════════ HEADER ══════════════════════════════════════════ -->
 <header>
-  <div class="header-badge">Confidential — Internal Technical Reference</div>
+  <div class="header-badge">Internal Technical Reference</div>
   <h1>Fotopia HR Agent</h1>
-  <p>Enterprise Architecture &amp; Technical Reference — June 2026</p>
+  <p>AI-powered HR automation for enterprise clients across Egypt &amp; MENA</p>
   <div class="header-meta">
-    <span><strong>Project Lead:</strong> Youssef Abdelmoneim</span>
-    <span><strong>Stakeholder:</strong> Dr. Ahmed El-Yazbi, R&amp;D AI Director</span>
-    <span><strong>Status:</strong> Phase 1 Complete · Phase 1.5 In Progress</span>
+    <span><strong>Stack:</strong> Claude (Anthropic) · FastAPI · PostgreSQL · React</span>
+    <span><strong>Status:</strong> Phase 1 Complete · Phase 2 In Progress</span>
     <span><strong>Pilot Client:</strong> Fotopia Technologies, Cairo</span>
+    <span><strong>AI Tools Live:</strong> 24</span>
   </div>
 </header>
 
-<!-- ══════════════════════════════════════════ TABS ═══════════════════════════════════════════ -->
 <nav class="tabs-bar" role="tablist">
-  <button class="tab-btn active" onclick="switchTab('dataflow',this)"><span class="icon">&#8635;</span> Vacation Request Flow</button>
-  <button class="tab-btn" onclick="switchTab('architecture',this)"><span class="icon">&#11041;</span> System Architecture</button>
+  <button class="tab-btn active" onclick="switchTab('overview',this)"><span class="icon">&#128200;</span> What It Does</button>
+  <button class="tab-btn" onclick="switchTab('dataflow',this)"><span class="icon">&#8635;</span> How It Works</button>
+  <button class="tab-btn" onclick="switchTab('architecture',this)"><span class="icon">&#11041;</span> Architecture</button>
   <button class="tab-btn" onclick="switchTab('techstack',this)"><span class="icon">&#9881;</span> Tech Stack</button>
   <button class="tab-btn" onclick="switchTab('security',this)"><span class="icon">&#9873;</span> Security</button>
-  <button class="tab-btn" onclick="switchTab('hardware',this)"><span class="icon">&#9635;</span> Hardware</button>
-  <button class="tab-btn" onclick="switchTab('tools',this)"><span class="icon">&#10799;</span> Tools &amp; Access</button>
+  <button class="tab-btn" onclick="switchTab('roadmap',this)"><span class="icon">&#128466;</span> Roadmap</button>
+  <button class="tab-btn" onclick="switchTab('tools',this)"><span class="icon">&#10799;</span> Demo &amp; Tools</button>
 </nav>
 
 <div class="content">
 
-<!-- ═══════════════════════════════════════ TAB 1: DATAFLOW ═══════════════════════════════════ -->
-<div id="tab-dataflow" class="tab-pane active">
+<!-- ══════════════════════════════════════ TAB 1: WHAT IT DOES ════════════════════════════════ -->
+<div id="tab-overview" class="tab-pane active">
   <div class="section-header">
-    <h2>Vacation Request — End-to-End Dataflow</h2>
-    <p>Complete sequence from employee chat message through approval, notification, and ERP sync. Every step writes to the audit log.</p>
+    <h2>What It Does</h2>
+    <p>Plain-language overview — what the agent handles, why it matters, and what makes it enterprise-ready.</p>
+  </div>
+
+  <div class="hero-statement">
+    <h3>HR managers spend 40–60% of their time on requests employees could resolve themselves in seconds.</h3>
+    <p>The Fotopia HR Agent handles those requests — via chat or plain email — with the same policy precision as a senior HR officer. Every action is logged. Humans approve anything consequential. The AI never makes final decisions.</p>
+  </div>
+
+  <div class="metric-grid">
+    <div class="metric-card">
+      <div class="metric-num">24</div>
+      <div class="metric-label">AI tools live in Phase 1</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-num">16</div>
+      <div class="metric-label">Leave types handled (full WIN Holding policy)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-num">3</div>
+      <div class="metric-label">Approval channels (email reply, link, UI)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-num">&lt;3s</div>
+      <div class="metric-label">IMAP poll interval for email approvals</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+
+    <div class="card">
+      <h3><span class="dot" style="background:#22c55e"></span>What's Live Today</h3>
+      <ul class="capability-list">
+        <li>
+          <span class="cap-icon">&#128197;</span>
+          <div>
+            <strong>Leave Management — full lifecycle</strong>
+            <span>Submit, check balance, approve, reject, cancel, track status. Enforces WIN Holding HR/BTE 001/7-2025 policy automatically — notice periods, balance checks, team availability, probation restrictions.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#128139;</span>
+          <div>
+            <strong>Bidirectional Email</strong>
+            <span>Employee emails hr.agent.fotopia@gmail.com in plain language. Claude Haiku reads it, extracts intent and dates, submits the request, notifies the manager, and confirms back to the employee's inbox — no UI required.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#128196;</span>
+          <div>
+            <strong>Official Document Generation</strong>
+            <span>Salary certificates, experience certificates, To Whom It May Concern letters — generated in seconds. Bilingual (Arabic + English). DB-verified data. Every document logged with a reference code (SC-/TW-/EC-).</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#128200;</span>
+          <div>
+            <strong>Odoo ERP Sync</strong>
+            <span>Every approved leave is automatically created in Odoo via XML-RPC. No double entry. Managers see approvals reflected in the ERP in real time.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#128220;</span>
+          <div>
+            <strong>Policy Q&amp;A</strong>
+            <span>Employees ask "can I take leave during probation?" or "how many days for hajj?" — agent searches the actual policy document and cites the exact section. No hallucinated answers.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#129518;</span>
+          <div>
+            <strong>End-of-Service Calculator</strong>
+            <span>Deterministic Egyptian Labor Law gratuity calculation — broken down by period, cap applied. LLM never touches the math; all Python.</span>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3><span class="dot" style="background:#3b82f6"></span>Why It's Enterprise-Ready</h3>
+      <ul class="capability-list">
+        <li>
+          <span class="cap-icon">&#128203;</span>
+          <div>
+            <strong>Every action audited</strong>
+            <span>The audit log records every tool call — success, denial, error — with actor, role, latency, and result. No tool can bypass this. Phase 3 adds hash-chain tamper evidence for regulated environments.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#128100;</span>
+          <div>
+            <strong>Human always approves consequential actions</strong>
+            <span>Leave approvals need a manager. Employee record creation and social insurance enrollment are permanently HITL-gated — the AI can never execute these unilaterally.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#127970;</span>
+          <div>
+            <strong>Multi-tenant from day 1</strong>
+            <span>Every table carries tenant_id. One deployment serves multiple clients. Data is physically isolated at the database row level. Phase 2 adds Row-Level Security FORCE at the Postgres engine level.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#128295;</span>
+          <div>
+            <strong>LLM is swappable</strong>
+            <span>Claude is the default. Grok is a drop-in via one env var. Self-hosted Llama/Qwen works for clients who can't send data to a cloud API (Egyptian PDPL concern). Zero code changes required.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#128274;</span>
+          <div>
+            <strong>Access control lives in code, not prompts</strong>
+            <span>Role checks happen in the ToolRegistry (Python) and PostgreSQL (RLS) — not in the system prompt. A jailbreak cannot override a database permission check.</span>
+          </div>
+        </li>
+        <li>
+          <span class="cap-icon">&#127468;&#127463;</span>
+          <div>
+            <strong>Egyptian legal compliance built in</strong>
+            <span>WIN Holding HR/BTE 001/7-2025 policy enforced at every leave submission. End-of-service follows Egyptian Labor Law Articles 117–119. Egypt PDPL cross-border transfer is flagged as a go-live prerequisite — demo runs on synthetic data.</span>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:#f97316"></span>Target Clients — Egypt &amp; MENA</h3>
+    <div class="grid-3">
+      <div style="text-align:center;padding:1rem">
+        <div style="font-size:2rem;margin-bottom:0.5rem">&#127984;</div>
+        <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.3rem">Banks &amp; Financial Institutions</div>
+        <div style="font-size:0.78rem;color:var(--text-2)">Regulated environments, strict audit requirements, compliance-heavy HR processes</div>
+      </div>
+      <div style="text-align:center;padding:1rem">
+        <div style="font-size:2rem;margin-bottom:0.5rem">&#127963;</div>
+        <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.3rem">Government &amp; Public Sector</div>
+        <div style="font-size:0.78rem;color:var(--text-2)">Large headcounts, manual paper-based processes, bilingual (Arabic/English) requirements</div>
+      </div>
+      <div style="text-align:center;padding:1rem">
+        <div style="font-size:2rem;margin-bottom:0.5rem">&#127973;</div>
+        <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.3rem">Healthcare Organisations</div>
+        <div style="font-size:0.78rem;color:var(--text-2)">Shift-based scheduling, complex leave rules, sensitive employee data handling</div>
+      </div>
+    </div>
+    <p class="footnote" style="margin-top:1rem;border-top:1px solid var(--border);padding-top:0.75rem"><strong>Pilot:</strong> Fotopia Technologies, Cairo — running live on synthetic employee data. Nourhan Hosny (HR Project Lead) is the first real user. Real-client go-live pending PDPL cross-border transfer decision and ZDR agreement with Anthropic.</p>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════ TAB 2: HOW IT WORKS ════════════════════════════════ -->
+<div id="tab-dataflow" class="tab-pane">
+  <div class="section-header">
+    <h2>How It Works</h2>
+    <p>Two entry points — chat UI and email — both converge on the same secure tool gateway. Every step writes to the audit log.</p>
   </div>
 
   <div class="mermaid-wrap">
+    <div class="diagram-label">&#9654; Path A — Chat UI (leave request via browser)</div>
     <div class="mermaid">
 sequenceDiagram
     autonumber
     participant E   as Employee<br/>(Chat UI)
-    participant API as FastAPI<br/>Python 3.11
-    participant LLM as Claude Sonnet 4-5<br/>Anthropic SDK
+    participant API as FastAPI
+    participant LLM as Claude Sonnet 4-6<br/>(Anthropic)
     participant TR  as ToolRegistry<br/>(Security Gateway)
-    participant T   as submit_leave_request<br/>(Tool)
-    participant DB  as PostgreSQL 15<br/>(leave_requests)
-    participant SMTP as Office 365 SMTP<br/>port 587 STARTTLS
+    participant DB  as PostgreSQL
+    participant SMTP as Office 365<br/>SMTP
     participant MGR as Manager<br/>Inbox
-    participant IMAP as Gmail IMAP Listener<br/>port 993 SSL
-    participant OD  as Odoo ERP<br/>XML-RPC v2
+    participant IMAP as Gmail IMAP<br/>Listener
+    participant OD  as Odoo ERP<br/>XML-RPC
 
-    E->>API: POST /chat {message, session_id}<br/>"Submit 5 days annual leave July 10"
+    E->>API: POST /chat — "Submit 5 days annual leave July 15"
     Note over API: build_context() → ToolContext<br/>{tenant_id, role, employee_code}
-    API->>LLM: messages + tool_schemas<br/>(filtered by role — policy before prompt)
-    LLM-->>API: tool_use → submit_leave_request<br/>{employee_code, leave_type, start, end}
+    API->>LLM: messages + tool schemas (filtered by role)
+    LLM-->>API: tool_use → submit_leave_request
     API->>TR: execute("submit_leave_request", args, ctx)
-    Note over TR: Re-check role permission<br/>Re-check row-level access
-    TR->>T: run(args, data_source, ctx)
-    T->>DB: INSERT leave_requests (status=pending)<br/>INSERT pending_actions (token)
-    DB-->>T: leave_id, approval_token
-    T->>SMTP: send_email(manager, approval_link)<br/>Reply-To: hr.agent.fotopia@gmail.com
-    SMTP-->>MGR: Approval Request Email
-    TR->>DB: INSERT audit_log (tool, actor, outcome, latency_ms)
+    Note over TR: Re-check role · Re-check row access
+    TR->>DB: INSERT leave_requests · INSERT pending_actions
+    DB-->>TR: leave_id · approval_token
+    TR->>SMTP: Manager approval email (Reply-To = Gmail)
+    SMTP-->>MGR: "Approve / Reject" with signed link
+    TR->>DB: INSERT audit_log (tool · actor · outcome · latency_ms)
     API-->>E: "Request submitted — awaiting manager approval"
 
-    alt Manager replies by email (bidirectional)
-        MGR->>IMAP: Reply APPROVE or REJECT
+    alt Manager replies APPROVE by email
+        MGR->>IMAP: Reply "APPROVE"
         IMAP->>API: POST /api/leave/resolve (token + decision)
     else Manager clicks approval link
         MGR->>API: GET /approve/{token}?action=approve
-    else Manager uses UI Approval Inbox
+    else Manager uses UI inbox
         MGR->>API: POST /api/leave/{id}/approve
     end
 
-    API->>DB: UPDATE leave_requests status=approved<br/>UPDATE leave_balances used_days
-    API->>SMTP: send_email(employee, confirmation)
+    API->>DB: UPDATE leave_requests status=approved · UPDATE leave_balances
+    API->>SMTP: Confirmation email → employee notification_email
     API->>OD: XML-RPC hr.leave.create + action_validate
     OD-->>API: odoo_leave_id
-    API->>DB: INSERT audit_log (approval event)
-    SMTP-->>E: Confirmation Email
+    SMTP-->>E: Confirmation email
+    </div>
+  </div>
+
+  <div class="mermaid-wrap">
+    <div class="diagram-label">&#9654; Path B — Bidirectional Email (employee emails in plain language, no UI needed)</div>
+    <div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant E    as Employee<br/>(sends email)
+    participant IMAP as Gmail IMAP<br/>hr.agent.fotopia
+    participant EA   as Email Agent<br/>(Claude Haiku)
+    participant TR   as ToolRegistry
+    participant DB   as PostgreSQL
+    participant SMTP as Office 365<br/>SMTP
+    participant MGR  as Manager
+
+    E->>IMAP: "I need annual leave 1st to 14th of August"
+    Note over IMAP: Polls every 3s<br/>Identifies sender via employees.email lookup
+    IMAP->>EA: Email body + sender address
+    Note over EA: Claude Haiku classifies intent:<br/>intent=leave_request · confidence=high<br/>start=2026-08-01 · end=2026-08-14<br/>leave_type=annual
+    EA->>TR: execute("submit_leave_request", args, ctx)
+    TR->>DB: INSERT leave_requests (pending)
+    DB-->>TR: leave_id · approval_token
+    TR->>SMTP: Notify manager with approval link
+    SMTP-->>MGR: "Approve / Reject" email
+    TR->>SMTP: Confirm submission to employee
+    SMTP-->>E: Confirmation to i-saif.ahmed@fotopiatech.com
+
+    alt Manager replies APPROVE
+        MGR->>IMAP: Reply "APPROVE"
+        IMAP->>DB: UPDATE status=approved · leave_balances
+        DB->>SMTP: Approval confirmation to employee
+    else Manager clicks link
+        MGR->>TR: GET /approve/{token}
+        TR->>DB: UPDATE status=approved
+        DB->>SMTP: Approval confirmation to employee
+    end
     </div>
   </div>
 
@@ -445,7 +649,7 @@ sequenceDiagram
         <span class="icon">&#128274;</span>
         <div>
           <h4>Policy Before Prompt</h4>
-          <p>ToolRegistry filters available tools by role <em>before</em> Claude sees them. An employee cannot invoke payroll tools because they are never offered to the LLM.</p>
+          <p>ToolRegistry filters available tools by role <em>before</em> Claude sees them. An employee cannot invoke payroll tools because they are never offered to the LLM — not because of a prompt instruction.</p>
         </div>
       </div>
       <div class="security-item">
@@ -459,13 +663,13 @@ sequenceDiagram
         <span class="icon">&#129518;</span>
         <div>
           <h4>LLM Never Does Math</h4>
-          <p>Leave duration is calculated in deterministic Python (weekday counter). The LLM extracts intent; business logic is code, not inference.</p>
+          <p>Leave duration, working day count, EOS gratuity — all deterministic Python. The LLM extracts intent; business logic is code. A wrong number on a legal document is a lawsuit.</p>
         </div>
       </div>
       <div class="security-item">
         <span class="icon">&#128260;</span>
         <div>
-          <h4>Triple Approval Channel</h4>
+          <h4>Three Approval Channels — One Handler</h4>
           <p>Manager approves via email reply, link click, or UI inbox. All three paths converge to the same <code>/api/leave/resolve</code> handler with identical authorization logic.</p>
         </div>
       </div>
@@ -473,11 +677,11 @@ sequenceDiagram
   </div>
 </div>
 
-<!-- ════════════════════════════════════ TAB 2: ARCHITECTURE ══════════════════════════════════ -->
+<!-- ════════════════════════════════════ TAB 3: ARCHITECTURE ══════════════════════════════════ -->
 <div id="tab-architecture" class="tab-pane">
   <div class="section-header">
     <h2>System Architecture — 9 Layers</h2>
-    <p>Designed so new capabilities are added, never rewritten. Layers 1–6 and 9 are operational today.</p>
+    <p>Designed so new capabilities are added, never rewritten. Layers 1–6 and 8–9 are operational today.</p>
   </div>
 
   <div class="layer-stack">
@@ -486,8 +690,8 @@ sequenceDiagram
       <div class="layer-num" style="background:rgba(37,99,235,0.2);color:#93c5fd">1</div>
       <div class="layer-body">
         <strong>Presentation</strong>
-        <p>React 18.3 + Vite 5.4 — Chat interface, document preview, leave submission, manager approval inbox</p>
-        <div style="margin-top:0.4rem"><span class="tag blue">React 18.3.1</span><span class="tag blue">Vite 5.4.0</span><span class="tag blue">JavaScript / JSX</span><span class="tag blue">react-markdown 10.1</span></div>
+        <p>React 18.3 + Vite — Chat interface, document preview, leave submission, manager approval inbox, login screen</p>
+        <div><span class="tag blue">React 18.3.1</span><span class="tag blue">Vite 5.4.0</span><span class="tag blue">JavaScript / JSX</span><span class="tag blue">react-markdown 10.1</span></div>
       </div>
       <div class="layer-status"><span class="pill live">Live</span></div>
     </div>
@@ -496,8 +700,8 @@ sequenceDiagram
       <div class="layer-num" style="background:rgba(168,85,247,0.2);color:#d8b4fe">2</div>
       <div class="layer-body">
         <strong>API / Identity</strong>
-        <p>FastAPI 0.115. <code>build_context()</code> returns ToolContext <code>{tenant_id, user_id, role, employee_code}</code>. Stubbed today — Phase 2 replaces this one function with JWT validation. Nothing else changes.</p>
-        <div style="margin-top:0.4rem"><span class="tag purple">FastAPI 0.115.0</span><span class="tag purple">Uvicorn 0.30.6</span><span class="tag purple">Pydantic 2.8.2</span><span class="tag yellow">JWT auth → Phase 2</span></div>
+        <p>FastAPI 0.115. <code>build_context()</code> returns <code>ToolContext {tenant_id, user_id, role, employee_code}</code>. Stubbed today — Phase 2 replaces this one function with JWT validation. Nothing else in the stack changes.</p>
+        <div><span class="tag purple">FastAPI 0.115.0</span><span class="tag purple">Uvicorn 0.30.6</span><span class="tag purple">Pydantic 2.8.2</span><span class="tag yellow">JWT auth → Phase 2</span></div>
       </div>
       <div class="layer-status"><span class="pill live">Live (stubbed)</span></div>
     </div>
@@ -506,8 +710,8 @@ sequenceDiagram
       <div class="layer-num" style="background:rgba(6,182,212,0.2);color:#67e8f9">3</div>
       <div class="layer-body">
         <strong>Orchestrator</strong>
-        <p>Raw Anthropic SDK <code>tool_use</code> loop, MAX_ITERS=10. Conversation history per session in-memory. Phase 2 moves to Redis. Future: LangGraph state machine runs alongside (not instead) for multi-day workflows — both use the same ToolRegistry.</p>
-        <div style="margin-top:0.4rem"><span class="tag cyan">anthropic SDK ≥0.40.0</span><span class="tag cyan">claude-sonnet-4-5</span><span class="tag cyan">MAX_ITERS=10</span><span class="tag yellow">Redis → Phase 2</span><span class="tag yellow">LangGraph → Phase 3</span></div>
+        <p>Raw Anthropic SDK <code>tool_use</code> loop, MAX_ITERS=10. Conversation history per session in-memory (Redis in Phase 2). Email path uses a separate stateless Email Agent (Claude Haiku) for intent classification. Future: LangGraph for multi-day onboarding workflows — both use the same ToolRegistry.</p>
+        <div><span class="tag cyan">anthropic SDK ≥0.40.0</span><span class="tag cyan">claude-sonnet-4-6 (chat)</span><span class="tag cyan">claude-haiku-4-5 (email)</span><span class="tag cyan">MAX_ITERS=10</span><span class="tag yellow">Redis → Phase 2</span><span class="tag yellow">LangGraph → Phase 3</span></div>
       </div>
       <div class="layer-status"><span class="pill live">Live</span></div>
     </div>
@@ -516,8 +720,8 @@ sequenceDiagram
       <div class="layer-num" style="background:rgba(239,68,68,0.2);color:#fca5a5">4</div>
       <div class="layer-body">
         <strong>Tool Gateway — Security Boundary</strong>
-        <p><code>schemas_for(ctx)</code> filters tool list by role BEFORE the LLM call. <code>execute(name, args, ctx)</code> re-checks role, runs the tool, writes <code>audit_log</code>. The only legal call path — tools cannot be called directly.</p>
-        <div style="margin-top:0.4rem"><span class="tag red">Policy-before-prompt</span><span class="tag red">Double role check</span><span class="tag red">100% audit coverage</span></div>
+        <p><code>schemas_for(ctx)</code> filters tool list by role <em>before</em> the LLM call. <code>execute(name, args, ctx)</code> re-checks role, runs the tool, writes <code>audit_log</code>. The only legal call path — tools cannot be invoked directly.</p>
+        <div><span class="tag red">Policy-before-prompt</span><span class="tag red">Double role check</span><span class="tag red">100% audit coverage</span></div>
       </div>
       <div class="layer-status"><span class="pill live">Live</span></div>
     </div>
@@ -525,10 +729,13 @@ sequenceDiagram
     <div class="layer" style="background:linear-gradient(90deg,rgba(34,197,94,0.08) 0%,transparent 100%)">
       <div class="layer-num" style="background:rgba(34,197,94,0.2);color:#86efac">5</div>
       <div class="layer-body">
-        <strong>Tools (12 live)</strong>
-        <p>Each defines <code>allowed_roles</code>, receives <code>ToolContext</code>, enforces row-level access, returns <code>ToolResult</code>. LLM never invents content or does math.</p>
-        <div style="margin-top:0.4rem">
-          <span class="tag green">get_employee_data</span><span class="tag green">search_employees</span><span class="tag green">list_employees</span><span class="tag green">get_leave_balance</span><span class="tag green">get_employee_summary</span><span class="tag green">get_employee_documents</span><span class="tag green">generate_salary_certificate</span><span class="tag green">generate_twimc_letter</span><span class="tag green">generate_experience_certificate</span><span class="tag green">calculate_end_of_service</span><span class="tag green">submit_leave_request</span><span class="tag green">approve_leave_request</span>
+        <strong>Tools — 24 live</strong>
+        <p>Each defines <code>allowed_roles</code>, receives <code>ToolContext</code>, enforces row-level access, returns <code>ToolResult</code>. LLM never invents document content or does math.</p>
+        <div>
+          <span class="tag green">get_employee_data</span><span class="tag green">search_employees</span><span class="tag green">list_employees</span><span class="tag green">get_employee_summary</span><span class="tag green">get_employee_documents</span>
+          <span class="tag green">get_leave_balance</span><span class="tag green">check_request_completeness</span><span class="tag green">check_leave_eligibility</span><span class="tag green">submit_leave_request</span><span class="tag green">approve_leave_request</span><span class="tag green">reject_leave_request</span><span class="tag green">cancel_leave_request</span><span class="tag green">get_leave_requests</span><span class="tag green">get_pending_approvals</span><span class="tag green">get_leave_waiting_status</span><span class="tag green">get_team_calendar</span>
+          <span class="tag green">generate_salary_certificate</span><span class="tag green">generate_twimc_letter</span><span class="tag green">generate_experience_certificate</span>
+          <span class="tag green">calculate_end_of_service</span><span class="tag green">search_policy</span><span class="tag green">check_document_sensitivity</span><span class="tag green">audit_document_sensitivity</span><span class="tag green">get_employee_document_history</span>
         </div>
       </div>
       <div class="layer-status"><span class="pill live">Live</span></div>
@@ -538,8 +745,8 @@ sequenceDiagram
       <div class="layer-num" style="background:rgba(234,179,8,0.2);color:#fde047">6</div>
       <div class="layer-body">
         <strong>Data Layer — PostgreSQL 15</strong>
-        <p><code>tenant_id</code> on every table and every query. <code>DataSource</code> abstraction isolates tools from the DB driver. Phase 2 adds RLS FORCE + field-level encryption for <code>national_id</code> and <code>salary</code>.</p>
-        <div style="margin-top:0.4rem"><span class="tag yellow">PostgreSQL 15.18</span><span class="tag yellow">pgvector extension</span><span class="tag yellow">psycopg2-binary 2.9.9</span><span class="tag orange">RLS FORCE → Phase 2</span></div>
+        <p><code>tenant_id</code> on every table and every query. <code>DataSource</code> abstraction isolates tools from the DB driver — Odoo becomes a second data source via the same interface. Phase 2 adds RLS FORCE + field-level encryption for <code>national_id</code> and <code>salary</code>.</p>
+        <div><span class="tag yellow">PostgreSQL 15.18</span><span class="tag yellow">pgvector extension</span><span class="tag yellow">psycopg2-binary 2.9.9</span><span class="tag orange">RLS FORCE → Phase 2</span><span class="tag orange">Field encryption → Phase 3</span></div>
       </div>
       <div class="layer-status"><span class="pill live">Live</span></div>
     </div>
@@ -548,8 +755,8 @@ sequenceDiagram
       <div class="layer-num" style="background:rgba(107,114,128,0.2);color:#9ca3af">7</div>
       <div class="layer-body">
         <strong>Knowledge / RAG Layer</strong>
-        <p>pgvector. Every chunk carries <code>tenant_id + allowed_roles + owner_employee_id</code>. Metadata pre-filter runs BEFORE semantic search — never after. Unclassified chunks default to most-restrictive label (fail-closed).</p>
-        <div style="margin-top:0.4rem"><span class="tag">pgvector</span><span class="tag">Pre-filter retrieval</span><span class="tag">Fail-closed labeling</span></div>
+        <p>pgvector. Every chunk carries <code>tenant_id + allowed_roles + owner_employee_id</code>. Metadata pre-filter runs <em>before</em> semantic search — never after. Unclassified chunks default to most-restrictive label (fail-closed).</p>
+        <div><span class="tag">pgvector</span><span class="tag">Pre-filter retrieval</span><span class="tag">Fail-closed labeling</span></div>
       </div>
       <div class="layer-status"><span class="pill planned">Phase 3</span></div>
     </div>
@@ -559,7 +766,7 @@ sequenceDiagram
       <div class="layer-body">
         <strong>LLM Layer</strong>
         <p><code>llm/claude.py</code> is the only file importing the Anthropic SDK. Stateless per request. Grok/XAI is a drop-in via one env var. Self-hosted Llama/Qwen supported for on-prem clients — zero tool changes required.</p>
-        <div style="margin-top:0.4rem"><span class="tag orange">claude-sonnet-4-5/4-6</span><span class="tag orange">Grok/XAI swap via env var</span><span class="tag orange">Stateless — no data retained</span></div>
+        <div><span class="tag orange">claude-sonnet-4-6 (primary)</span><span class="tag orange">claude-haiku-4-5 (classification)</span><span class="tag orange">Grok/XAI via LLM_PROVIDER</span><span class="tag orange">Stateless — no data retained</span></div>
       </div>
       <div class="layer-status"><span class="pill live">Live</span></div>
     </div>
@@ -569,7 +776,7 @@ sequenceDiagram
       <div class="layer-body">
         <strong>Audit Layer</strong>
         <p><code>audit_log</code> records every tool call: tool name, actor role, outcome, result summary, latency_ms, timestamp. Written by the ToolRegistry — cannot be bypassed. Phase 3 adds hash-chain tamper-evidence and WORM-mirror storage.</p>
-        <div style="margin-top:0.4rem"><span class="tag purple">100% coverage</span><span class="tag purple">latency_ms tracking</span><span class="tag yellow">Hash-chain + WORM → Phase 3</span></div>
+        <div><span class="tag purple">100% coverage</span><span class="tag purple">latency_ms tracking</span><span class="tag yellow">Hash-chain + WORM → Phase 3</span></div>
       </div>
       <div class="layer-status"><span class="pill live">Live</span></div>
     </div>
@@ -592,11 +799,11 @@ sequenceDiagram
   </div>
 </div>
 
-<!-- ══════════════════════════════════════ TAB 3: TECH STACK ══════════════════════════════════ -->
+<!-- ══════════════════════════════════════ TAB 4: TECH STACK ══════════════════════════════════ -->
 <div id="tab-techstack" class="tab-pane">
   <div class="section-header">
     <h2>Technology Stack</h2>
-    <p>All versions pinned from <code>requirements.txt</code> and <code>package.json</code> as of June 2026.</p>
+    <p>All versions pinned from <code>requirements.txt</code> and <code>package.json</code> as of July 2026.</p>
   </div>
 
   <div class="grid-2">
@@ -604,11 +811,10 @@ sequenceDiagram
     <div class="card">
       <h3><span class="dot" style="background:#3b82f6"></span>Frontend</h3>
       <div class="version-row"><span class="lib">React</span><span class="ver">18.3.1</span><span class="role">UI framework</span></div>
-      <div class="version-row"><span class="lib">React DOM</span><span class="ver">18.3.1</span><span class="role">Browser renderer</span></div>
       <div class="version-row"><span class="lib">Vite</span><span class="ver">5.4.0</span><span class="role">Build tool / dev server</span></div>
       <div class="version-row"><span class="lib">react-markdown</span><span class="ver">10.1.0</span><span class="role">Chat message rendering</span></div>
-      <div class="version-row"><span class="lib">Language</span><span class="ver">JavaScript (JSX)</span><span class="role">Not TypeScript</span></div>
-      <p class="footnote" style="margin-top:0.75rem">Single-page app. Communicates with backend via <code>fetch()</code> — no HTTP client library dependency.</p>
+      <div class="version-row"><span class="lib">Language</span><span class="ver">JavaScript (JSX)</span><span class="role">No TypeScript</span></div>
+      <p class="footnote" style="margin-top:0.75rem">Single-page app. Communicates with backend via <code>fetch()</code> — no HTTP client library.</p>
     </div>
 
     <div class="card">
@@ -618,19 +824,19 @@ sequenceDiagram
       <div class="version-row"><span class="lib">Uvicorn</span><span class="ver">0.30.6</span><span class="role">ASGI server</span></div>
       <div class="version-row"><span class="lib">Pydantic</span><span class="ver">2.8.2</span><span class="role">Schema validation</span></div>
       <div class="version-row"><span class="lib">python-dotenv</span><span class="ver">1.0.1</span><span class="role">Env variable loading</span></div>
-      <div class="version-row"><span class="lib">PyJWT</span><span class="ver">≥ 2.8.0</span><span class="role">JWT auth (Phase 2)</span></div>
+      <div class="version-row"><span class="lib">PyJWT</span><span class="ver">≥ 2.8.0</span><span class="role">JWT auth — Phase 2</span></div>
       <div class="version-row"><span class="lib">bcrypt</span><span class="ver">≥ 4.0.0</span><span class="role">Password hashing</span></div>
     </div>
 
     <div class="card">
       <h3><span class="dot" style="background:#a855f7"></span>AI / LLM</h3>
       <div class="version-row"><span class="lib">anthropic SDK</span><span class="ver">≥ 0.40.0</span><span class="role">Primary LLM client</span></div>
-      <div class="version-row"><span class="lib">Model (default)</span><span class="ver">claude-sonnet-4-5</span><span class="role">Anthropic Claude</span></div>
-      <div class="version-row"><span class="lib">Model (current env)</span><span class="ver">claude-sonnet-4-6</span><span class="role">Latest Sonnet</span></div>
+      <div class="version-row"><span class="lib">Chat model</span><span class="ver">claude-sonnet-4-6</span><span class="role">Full tool-use loop</span></div>
+      <div class="version-row"><span class="lib">Email classification</span><span class="ver">claude-haiku-4-5</span><span class="role">Intent + date extraction</span></div>
       <div class="version-row"><span class="lib">Loop pattern</span><span class="ver">tool_use — raw SDK</span><span class="role">No LangChain</span></div>
       <div class="version-row"><span class="lib">Max iterations</span><span class="ver">10 per request</span><span class="role">Runaway guard</span></div>
-      <div class="version-row"><span class="lib">Alt provider</span><span class="ver">Grok / XAI API</span><span class="role">Swappable via LLM_PROVIDER</span></div>
-      <p class="footnote" style="margin-top:0.75rem">Anthropic SDK is imported in exactly one file — <code>llm/claude.py</code>. Swap providers with one environment variable; no tool or registry code changes.</p>
+      <div class="version-row"><span class="lib">Alt provider</span><span class="ver">Grok / XAI API</span><span class="role">Swap via LLM_PROVIDER</span></div>
+      <p class="footnote" style="margin-top:0.75rem">Anthropic SDK imported in exactly one file — <code>llm/claude.py</code>. Swap providers with one env var; no tool or registry changes.</p>
     </div>
 
     <div class="card">
@@ -648,15 +854,15 @@ sequenceDiagram
       <div class="version-row"><span class="lib">jinja2</span><span class="ver">3.1.4</span><span class="role">Template engine</span></div>
       <div class="version-row"><span class="lib">Output format</span><span class="ver">PDF (bilingual)</span><span class="role">Arabic + English</span></div>
       <div class="version-row"><span class="lib">Document types</span><span class="ver">SC- / TW- / EC-</span><span class="role">Salary / TWIMC / Exp cert</span></div>
-      <p class="footnote" style="margin-top:0.75rem">Hardcoded fpdf layouts with DB-driven slot-filling. LLM never invents document content. Reference codes are deterministic and stored in <code>audit_log</code>.</p>
+      <p class="footnote" style="margin-top:0.75rem">Hardcoded fpdf layouts, DB-driven slot-filling. LLM never invents content. Reference codes are deterministic and stored in <code>audit_log</code>.</p>
     </div>
 
     <div class="card">
       <h3><span class="dot" style="background:#06b6d4"></span>Email &amp; Integration</h3>
       <div class="version-row"><span class="lib">SMTP sender</span><span class="ver">Office 365 · port 587</span><span class="role">Outbound notifications</span></div>
-      <div class="version-row"><span class="lib">IMAP listener</span><span class="ver">Gmail · port 993</span><span class="role">Approval replies</span></div>
-      <div class="version-row"><span class="lib">SMTP library</span><span class="ver">smtplib (stdlib)</span><span class="role">No extra dependency</span></div>
-      <div class="version-row"><span class="lib">IMAP library</span><span class="ver">imaplib (stdlib)</span><span class="role">No extra dependency</span></div>
+      <div class="version-row"><span class="lib">IMAP listener</span><span class="ver">Gmail · port 993</span><span class="role">Email requests + approvals</span></div>
+      <div class="version-row"><span class="lib">SMTP/IMAP library</span><span class="ver">smtplib / imaplib</span><span class="role">Python stdlib — no extras</span></div>
+      <div class="version-row"><span class="lib">Email agent (AI)</span><span class="ver">Claude Haiku 4-5</span><span class="role">Intent + date extraction</span></div>
       <div class="version-row"><span class="lib">ACS (Azure Email)</span><span class="ver">azure-comm-email 1.0.0</span><span class="role">Ready — not activated</span></div>
       <div class="version-row"><span class="lib">ERP Integration</span><span class="ver">Odoo XML-RPC v2</span><span class="role">Leave sync to Odoo</span></div>
       <div class="version-row"><span class="lib">Odoo library</span><span class="ver">xmlrpc.client (stdlib)</span><span class="role">No extra dependency</span></div>
@@ -673,20 +879,20 @@ sequenceDiagram
         <div class="version-row"><span class="lib">DB image</span><span class="ver">pgvector/pgvector:pg15</span></div>
       </div>
       <div>
-        <div class="version-row"><span class="lib">Backend port</span><span class="ver">8000</span></div>
-        <div class="version-row"><span class="lib">Postgres port</span><span class="ver">5432 (internal)</span></div>
+        <div class="version-row"><span class="lib">Backend port</span><span class="ver">8000 (FastAPI)</span></div>
         <div class="version-row"><span class="lib">Frontend dev</span><span class="ver">5173 (Vite HMR)</span></div>
+        <div class="version-row"><span class="lib">DB port</span><span class="ver">5432 (internal only)</span></div>
       </div>
       <div>
         <div class="version-row"><span class="lib">Schema init</span><span class="ver">schema.sql on startup</span></div>
-        <div class="version-row"><span class="lib">Config</span><span class="ver">ENV vars only</span></div>
+        <div class="version-row"><span class="lib">Config</span><span class="ver">ENV vars only — no hardcoding</span></div>
         <div class="version-row"><span class="lib">Target OS</span><span class="ver">Ubuntu 22.04 LTS</span></div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ════════════════════════════════════════ TAB 4: SECURITY ══════════════════════════════════ -->
+<!-- ════════════════════════════════════════ TAB 5: SECURITY ══════════════════════════════════ -->
 <div id="tab-security" class="tab-pane">
   <div class="section-header">
     <h2>Security Architecture</h2>
@@ -708,14 +914,14 @@ sequenceDiagram
         <span class="icon">&#128231;</span>
         <div>
           <h4>SMTP STARTTLS — Office 365</h4>
-          <p>Outbound email uses STARTTLS upgrade on port 587. TLS is negotiated before any credentials are transmitted. Connection is IPv4-forced to prevent Docker IPv6 routing failures.</p>
+          <p>Outbound email uses STARTTLS upgrade on port 587. TLS is negotiated before credentials are transmitted. Connection is IPv4-forced to prevent Docker IPv6 routing failures.</p>
         </div>
       </div>
       <div class="security-item">
         <span class="icon">&#128236;</span>
         <div>
           <h4>IMAP over SSL — Gmail</h4>
-          <p>Inbound approval listener connects via SSL on port 993. An App Password (not the account password) is used — limits scope of credential to IMAP access only.</p>
+          <p>Inbound approval listener connects via SSL on port 993. An App Password (not the account password) is used — limits credential scope to IMAP access only.</p>
         </div>
       </div>
       <div class="security-item">
@@ -729,7 +935,7 @@ sequenceDiagram
         <span class="icon">&#127915;</span>
         <div>
           <h4>Signed one-time approval tokens</h4>
-          <p>Each approval link contains a token stored in <code>pending_actions</code>. Tokens are consumed on first use. Prevents replay attacks on the leave approval endpoint.</p>
+          <p>Each approval link contains a token stored in <code>pending_actions</code>. Tokens are consumed on first use — prevents replay attacks on the leave approval endpoint.</p>
         </div>
       </div>
     </div>
@@ -740,7 +946,7 @@ sequenceDiagram
         <span class="icon">&#128208;</span>
         <div>
           <h4>PostgreSQL Row-Level Security</h4>
-          <p><code>tenant_id</code> on every table. Phase 2 enables <code>ALTER TABLE ... ENABLE ROW LEVEL SECURITY ... FORCE</code>. Queries from any role are automatically scoped to their tenant — cross-tenant data leaks become impossible at the database engine level.</p>
+          <p><code>tenant_id</code> on every table. Phase 2 enables <code>ENABLE ROW LEVEL SECURITY FORCE</code> — queries from any role are automatically scoped to their tenant. Cross-tenant data leaks become impossible at the database engine level.</p>
           <p style="color:var(--yellow);font-size:0.75rem;margin-top:0.25rem">RLS FORCE targeted for Phase 2</p>
         </div>
       </div>
@@ -748,7 +954,7 @@ sequenceDiagram
         <span class="icon">&#128273;</span>
         <div>
           <h4>Secrets via environment variables only</h4>
-          <p>All credentials (API keys, DB passwords, SMTP) are loaded from <code>.env</code> via <code>config.py</code>. No secret appears in source code or version control. <code>.env</code> is gitignored.</p>
+          <p>All credentials (API keys, DB passwords, SMTP) loaded from <code>.env</code> via <code>config.py</code>. No secret appears in source code or version control. <code>.env</code> is gitignored.</p>
         </div>
       </div>
       <div class="security-item">
@@ -771,7 +977,7 @@ sequenceDiagram
 
   <div class="card">
     <h3><span class="dot" style="background:#f97316"></span>Role-Based Access Control</h3>
-    <p style="font-size:0.83rem;color:var(--text-2);margin-bottom:1rem">Four roles. Access is enforced at two independent layers: ToolRegistry (application) and PostgreSQL RLS (database). Both must pass.</p>
+    <p style="font-size:0.83rem;color:var(--text-2);margin-bottom:1rem">Four roles. Access enforced at two independent layers: ToolRegistry (application) and PostgreSQL RLS (database). Both must pass.</p>
     <div style="overflow-x:auto">
       <table>
         <thead>
@@ -806,15 +1012,15 @@ sequenceDiagram
         </tbody>
       </table>
     </div>
-    <p class="footnote" style="margin-top:0.75rem">Row-level: HR roles see all employees in the tenant. An employee can only access their own record, matched via <code>employee_code</code> in ToolContext — enforced in every tool via <code>_can_access_employee()</code>.</p>
+    <p class="footnote" style="margin-top:0.75rem">Row-level: HR roles see all employees in the tenant. An employee sees only their own record, matched via <code>employee_code</code> in ToolContext — enforced in every tool via <code>_can_access_employee()</code>.</p>
   </div>
 
   <div class="card">
-    <h3><span class="dot" style="background:#ef4444"></span>Hard Security Rules</h3>
+    <h3><span class="dot" style="background:#ef4444"></span>Hard Security Rules — Never Violated</h3>
     <div class="grid-2">
       <div class="security-item">
         <span class="icon">&#9940;</span>
-        <div><h4>No SDK import outside llm/claude.py</h4><p>Anthropic SDK imported in exactly one file. Prevents prompt injection via rogue tool or middleware files.</p></div>
+        <div><h4>No SDK import outside llm/claude.py</h4><p>Anthropic SDK imported in exactly one file. Prevents prompt injection via rogue tool or middleware.</p></div>
       </div>
       <div class="security-item">
         <span class="icon">&#9940;</span>
@@ -822,11 +1028,11 @@ sequenceDiagram
       </div>
       <div class="security-item">
         <span class="icon">&#9940;</span>
-        <div><h4>No access control in the system prompt</h4><p>RBAC lives in tools + RLS. A jailbreak cannot override database-enforced permissions — the permission check is not a text instruction.</p></div>
+        <div><h4>No access control in the system prompt</h4><p>RBAC lives in tools + RLS. A jailbreak cannot override a database permission check — it is not a text instruction.</p></div>
       </div>
       <div class="security-item">
         <span class="icon">&#9940;</span>
-        <div><h4>LLM never does math</h4><p>Leave durations, EOS gratuity calculations — all deterministic Python. A wrong number on a legal document is a lawsuit.</p></div>
+        <div><h4>LLM never does math</h4><p>Leave durations, EOS gratuity — all deterministic Python. A wrong number on a legal document is a lawsuit.</p></div>
       </div>
       <div class="security-item">
         <span class="icon">&#9940;</span>
@@ -834,91 +1040,158 @@ sequenceDiagram
       </div>
       <div class="security-item">
         <span class="icon">&#9940;</span>
-        <div><h4>No live self-modifying prompts in production</h4><p>Offline prompt optimization (DSPy) produces frozen, version-controlled, human-reviewed artifacts. Live optimizer access to RBAC prompts is prohibited.</p></div>
+        <div><h4>No live self-modifying prompts in production</h4><p>Offline prompt optimization (DSPy) produces frozen, version-controlled, human-reviewed artifacts only.</p></div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════ TAB 5: HARDWARE ════════════════════════════════════ -->
-<div id="tab-hardware" class="tab-pane">
+<!-- ════════════════════════════════════════ TAB 6: ROADMAP ═══════════════════════════════════ -->
+<div id="tab-roadmap" class="tab-pane">
   <div class="section-header">
-    <h2>Hardware Requirements</h2>
-    <p>Requirements for running the full stack: PostgreSQL, FastAPI, React frontend, IMAP listener, and email service.</p>
+    <h2>Roadmap</h2>
+    <p>Four phases from pilot to platform. Each phase adds capabilities without rewriting what came before.</p>
   </div>
 
-  <div class="hw-grid">
-    <div class="hw-card">
-      <h4>Minimum — Development / Demo</h4>
-      <div class="hw-row"><span class="hw-label">CPU</span><span class="hw-val">2 vCPU (x86_64 or ARM64)</span></div>
-      <div class="hw-row"><span class="hw-label">RAM</span><span class="hw-val">4 GB</span></div>
-      <div class="hw-row"><span class="hw-label">Storage</span><span class="hw-val">20 GB SSD</span></div>
-      <div class="hw-row"><span class="hw-label">OS</span><span class="hw-val">macOS 13+ or Ubuntu 22.04</span></div>
-      <div class="hw-row"><span class="hw-label">Container</span><span class="hw-val">Docker Desktop 4.x</span></div>
-      <div class="hw-row"><span class="hw-label">Network</span><span class="hw-val">10 Mbps broadband</span></div>
+  <div class="roadmap-grid">
+
+    <div class="roadmap-phase done-phase">
+      <div>
+        <div class="phase-label">Phase 1 — Complete ✓</div>
+        <div class="phase-name">Foundation</div>
+      </div>
+      <div>
+        <ul class="phase-items">
+          <li>24 tools live: leave lifecycle, document generation, EOS calculator, policy search, document sensitivity</li>
+          <li>Bidirectional email — employees submit by email, Claude Haiku classifies intent and extracts dates</li>
+          <li>Odoo ERP sync — approved leaves created in Odoo automatically via XML-RPC</li>
+          <li>Full WIN Holding leave policy (HR/BTE 001/7-2025) — 16 leave types enforced in code</li>
+          <li>Multi-tenant data model, audit log, 26-employee demo dataset</li>
+        </ul>
+      </div>
+      <div><span class="pill live">Done</span></div>
     </div>
-    <div class="hw-card">
-      <h4>Recommended — Staging / Production</h4>
-      <div class="hw-row"><span class="hw-label">CPU</span><span class="hw-val">4 vCPU (x86_64)</span></div>
-      <div class="hw-row"><span class="hw-label">RAM</span><span class="hw-val">8 GB</span></div>
-      <div class="hw-row"><span class="hw-label">Storage</span><span class="hw-val">100 GB NVMe SSD</span></div>
-      <div class="hw-row"><span class="hw-label">OS</span><span class="hw-val">Ubuntu 22.04 LTS</span></div>
-      <div class="hw-row"><span class="hw-label">Container</span><span class="hw-val">Docker Engine + Compose v2</span></div>
-      <div class="hw-row"><span class="hw-label">Network</span><span class="hw-val">100 Mbps, static IP</span></div>
+
+    <div class="roadmap-phase active-phase">
+      <div>
+        <div class="phase-label">Phase 2 — In Progress</div>
+        <div class="phase-name">Security &amp; Auth</div>
+      </div>
+      <div>
+        <ul class="phase-items">
+          <li>JWT authentication — replaces stubbed <code>build_context()</code> with real token validation</li>
+          <li>PostgreSQL Row-Level Security FORCE — cross-tenant isolation at the database engine level</li>
+          <li>Redis session storage — conversation history survives server restarts</li>
+          <li>Onboarding document tools — offer letter, employment contract, NDA (document-gen only, no writes yet)</li>
+          <li>Anthropic Zero Data Retention agreement — prerequisite for real client data through cloud Claude</li>
+        </ul>
+      </div>
+      <div><span class="pill inprog">In Progress</span></div>
+    </div>
+
+    <div class="roadmap-phase">
+      <div>
+        <div class="phase-label">Phase 3 — Planned</div>
+        <div class="phase-name">Onboarding &amp; Knowledge</div>
+      </div>
+      <div>
+        <ul class="phase-items">
+          <li>Onboarding state machine — multi-day workflows that pause for human approval between steps</li>
+          <li>HITL-gated writes: <code>create_employee_record</code>, <code>enroll_social_insurance</code> — human approver required, no exceptions</li>
+          <li>RAG knowledge layer — pgvector, metadata pre-filter before semantic search, tenant-scoped chunks</li>
+          <li>Audit hash-chain + WORM mirror — tamper-evidence for regulated environments</li>
+          <li>Field-level encryption for <code>national_id</code> and <code>salary</code> — blind index pattern</li>
+        </ul>
+      </div>
+      <div><span class="pill planned">Planned</span></div>
+    </div>
+
+    <div class="roadmap-phase">
+      <div>
+        <div class="phase-label">Phase 4 — Vision</div>
+        <div class="phase-name">Platform &amp; Marketplace</div>
+      </div>
+      <div>
+        <ul class="phase-items">
+          <li>Database-per-tenant option for premium banking and government clients</li>
+          <li>Proactive "Jarvis" layer — daily briefings, pending approvals surfaced before users ask</li>
+          <li>Goal tracking — planning and checklist data, assisted execution via existing ToolRegistry</li>
+          <li>Department agent marketplace — Finance, Legal, Admin agents alongside HR</li>
+          <li>Offline prompt optimisation (DSPy/GEPA) once labelled eval dataset exists</li>
+        </ul>
+      </div>
+      <div><span class="pill planned">Vision</span></div>
+    </div>
+
+  </div>
+
+  <div class="vision-card">
+    <h3>&#127919; The Platform Vision — Agent Marketplace</h3>
+    <p>The HR agent is the first module of a "shared service operator" platform. A subscribed organisation gets a sidebar of department agents — each already provisioned with the access it needs. Employees type what they need; the right agent handles it.</p>
+    <div class="agent-cards">
+      <div class="agent-card">
+        <div class="agent-icon">&#128101;</div>
+        <div class="agent-name">HR Agent</div>
+        <div class="agent-status">Live — Pilot</div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-icon">&#128184;</div>
+        <div class="agent-name">Finance Agent</div>
+        <div class="agent-status">Phase 4</div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-icon">&#9878;</div>
+        <div class="agent-name">Legal Agent</div>
+        <div class="agent-status">Phase 4</div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-icon">&#128196;</div>
+        <div class="agent-name">Admin Agent</div>
+        <div class="agent-status">Phase 4</div>
+      </div>
     </div>
   </div>
 
   <div class="card">
-    <h3><span class="dot" style="background:#06b6d4"></span>Network Port Requirements</h3>
+    <h3><span class="dot" style="background:#ef4444"></span>Open Business / Legal Items — Not Engineering Blockers for the Demo</h3>
+    <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:1rem">Demo runs on synthetic data only. These items block real-client production go-live.</p>
     <table>
-      <thead><tr><th>Port</th><th>Protocol</th><th>Direction</th><th>Purpose</th></tr></thead>
-      <tbody>
-        <tr><td><code>443</code></td><td>HTTPS / TLS</td><td>Outbound</td><td>Anthropic API · Odoo ERP · Azure services</td></tr>
-        <tr><td><code>587</code></td><td>SMTP + STARTTLS</td><td>Outbound</td><td>Email delivery via Office 365</td></tr>
-        <tr><td><code>993</code></td><td>IMAP over SSL</td><td>Outbound</td><td>Approval reply listener — Gmail</td></tr>
-        <tr><td><code>8000</code></td><td>HTTP</td><td>Inbound (internal)</td><td>FastAPI — expose only via reverse proxy (nginx/Caddy)</td></tr>
-        <tr><td><code>5432</code></td><td>PostgreSQL</td><td>Internal only</td><td>Database — must NOT be exposed to host in production</td></tr>
-        <tr><td><code>80 / 443</code></td><td>HTTP / HTTPS</td><td>Inbound (public)</td><td>Reverse proxy — TLS termination point</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h3><span class="dot" style="background:#22c55e"></span>Container Resource Allocation</h3>
-    <table>
-      <thead><tr><th>Service</th><th>Image</th><th>Memory (min)</th><th>Memory (rec)</th><th>Notes</th></tr></thead>
+      <thead><tr><th>#</th><th>Item</th><th>Owner</th><th>Blocks</th></tr></thead>
       <tbody>
         <tr>
-          <td><code>backend</code></td>
-          <td><code>python:3.11-slim</code></td>
-          <td>512 MB</td>
-          <td>1 GB</td>
-          <td>FastAPI + Uvicorn workers + IMAP listener thread</td>
+          <td>1</td>
+          <td><strong>Egypt PDPL cross-border transfer</strong> — does routing tenant data through Anthropic's cloud API require a PDPC license? Self-hosted Llama/Qwen is the fallback if the answer is yes — the abstraction already supports it.</td>
+          <td>Dr. Ahmed / Raef</td>
+          <td>Real-client go-live</td>
         </tr>
         <tr>
-          <td><code>db</code></td>
-          <td><code>pgvector/pgvector:pg15</code></td>
-          <td>512 MB</td>
-          <td>2 GB</td>
-          <td>PostgreSQL <code>shared_buffers</code> should be ~25% of available RAM</td>
+          <td>2</td>
+          <td><strong>Anthropic Zero Data Retention (ZDR)</strong> — signed agreement required before real employee data (salary, national ID) goes through cloud Claude</td>
+          <td>Dr. Ahmed / Raef</td>
+          <td>Real client data through cloud Claude</td>
         </tr>
         <tr>
-          <td><code>frontend</code> (dev)</td>
-          <td>Node 20 / Vite</td>
-          <td>256 MB</td>
-          <td>512 MB</td>
-          <td>Production: compiled static files served by nginx — no Node runtime needed</td>
+          <td>3</td>
+          <td><strong>DPO appointment</strong> — PDPL requires a registered Data Protection Officer before processing salary and national ID at scale</td>
+          <td>Dr. Ahmed / Raef</td>
+          <td>Production launch with sensitive data</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><strong>HITL approval ownership</strong> — who is the designated human approver for gated onboarding actions (<code>create_employee_record</code>, <code>enroll_social_insurance</code>)?</td>
+          <td>Nourhan Hosny</td>
+          <td>Phase 3 onboarding state machine</td>
         </tr>
       </tbody>
     </table>
   </div>
 </div>
 
-<!-- ════════════════════════════════════════ TAB 6: TOOLS ═════════════════════════════════════ -->
+<!-- ════════════════════════════════════════ TAB 7: DEMO ══════════════════════════════════════ -->
 <div id="tab-tools" class="tab-pane">
   <div class="section-header">
-    <h2>Tools &amp; System Access Inventory</h2>
-    <p>All external services the system integrates with. All credentials are stored in <code>.env</code> — never in source code.</p>
+    <h2>Demo &amp; System Access</h2>
+    <p>All external services the system integrates with. All credentials are in <code>.env</code> — never in source code.</p>
   </div>
 
   <div class="card">
@@ -935,7 +1208,7 @@ sequenceDiagram
       <tbody>
         <tr>
           <td><strong>Anthropic Claude API</strong></td>
-          <td>Primary LLM — tool_use loop, intent parsing, response generation</td>
+          <td>Primary LLM — tool_use loop (Sonnet 4-6) + email classification (Haiku 4-5)</td>
           <td>HTTPS REST</td>
           <td><code>ANTHROPIC_API_KEY</code> in .env<br/><span style="color:var(--text-3);font-size:0.75rem">Rotate before production go-live</span></td>
           <td><span class="pill live">Live</span></td>
@@ -950,41 +1223,41 @@ sequenceDiagram
         <tr>
           <td><strong>Office 365 SMTP</strong></td>
           <td>Outbound email — leave notifications, approval request emails, employee confirmations</td>
-          <td>SMTP + STARTTLS<br/>port 587</td>
+          <td>SMTP + STARTTLS · port 587</td>
           <td><code>fotoagent@fotopiatech.com</code><br/><code>SMTP_PASSWORD</code> in .env</td>
           <td><span class="pill live">Live</span></td>
         </tr>
         <tr>
           <td><strong>Gmail IMAP</strong></td>
-          <td>Inbound bidirectional listener — receives manager email replies to approve or reject leave</td>
-          <td>IMAP over SSL<br/>port 993</td>
+          <td>Inbound listener — employee email requests (bidirectional) + manager approval replies</td>
+          <td>IMAP over SSL · port 993</td>
           <td><code>hr.agent.fotopia@gmail.com</code><br/>App Password in <code>IMAP_PASSWORD</code></td>
           <td><span class="pill live">Live</span></td>
         </tr>
         <tr>
-          <td><strong>Odoo ERP (WIN Holding)</strong></td>
-          <td>Leave sync — approved leaves are automatically created in Odoo via XML-RPC after approval</td>
+          <td><strong>Odoo ERP (WIN Holding staging)</strong></td>
+          <td>Leave sync — approved leaves created in Odoo via XML-RPC after approval</td>
           <td>HTTPS XML-RPC v2</td>
           <td>WIN Holding staging environment<br/><code>ODOO_URL</code>, <code>ODOO_USERNAME</code>, <code>ODOO_PASSWORD</code> in .env</td>
           <td><span class="pill live">Live</span></td>
         </tr>
         <tr>
           <td><strong>Azure Communication Services</strong></td>
-          <td>Enterprise transactional email sender — production-grade alternative to SMTP once provisioned</td>
-          <td>HTTPS REST<br/>(azure-communication-email 1.0.0)</td>
-          <td><code>AZURE_COMMUNICATION_CONNECTION_STRING</code> = empty (SMTP fallback active)<br/>Sender: <code>hr-agent@fotopia.ai</code></td>
+          <td>Enterprise transactional email — production alternative to SMTP once provisioned</td>
+          <td>HTTPS REST</td>
+          <td><code>AZURE_COMMUNICATION_CONNECTION_STRING</code> = empty → SMTP fallback active</td>
           <td><span class="pill ready">Ready — not activated</span></td>
         </tr>
         <tr>
           <td><strong>Grok / XAI API</strong></td>
-          <td>Alternative LLM — drop-in Claude replacement; switch with one env var, no tool changes</td>
+          <td>Alternative LLM — drop-in Claude replacement, switch with one env var</td>
           <td>HTTPS REST</td>
-          <td><code>XAI_API_KEY</code> in .env<br/><code>LLM_PROVIDER=grok</code> to activate</td>
+          <td><code>XAI_API_KEY</code> in .env · <code>LLM_PROVIDER=grok</code> to activate</td>
           <td><span class="pill ready">Ready</span></td>
         </tr>
         <tr>
           <td><strong>pgvector (PostgreSQL extension)</strong></td>
-          <td>Semantic vector search for RAG/knowledge layer — embedded in the pg15 Docker image</td>
+          <td>Semantic vector search for RAG/knowledge layer — bundled in the pg15 image</td>
           <td>PostgreSQL extension</td>
           <td>Bundled in <code>pgvector/pgvector:pg15</code> — no extra credentials needed</td>
           <td><span class="pill planned">Phase 3</span></td>
@@ -1008,14 +1281,14 @@ sequenceDiagram
         <span class="icon">&#128229;</span>
         <div>
           <h4>Inbound — Gmail IMAP listener</h4>
-          <p>Polls <code>hr.agent.fotopia@gmail.com</code> every 3 seconds. Parses APPROVE/REJECT replies from managers and routes to <code>/api/leave/resolve</code>.</p>
+          <p>Polls <code>hr.agent.fotopia@gmail.com</code> every 3 seconds. Handles two message types: (1) employee leave requests by email — classified by Claude Haiku; (2) manager APPROVE/REJECT replies.</p>
         </div>
       </div>
       <div class="security-item">
         <span class="icon">&#128100;</span>
         <div>
           <h4>Delivery target (<code>notification_email</code>)</h4>
-          <p>Each employee has a <code>notification_email</code> field decoupled from <code>employees.email</code>. The former is the delivery address; the latter is the Odoo/identity lookup key.</p>
+          <p>Each employee has <code>notification_email</code> decoupled from <code>employees.email</code>. Confirmations go to the personal inbox; the work email is the Odoo/identity lookup key.</p>
         </div>
       </div>
     </div>
@@ -1027,28 +1300,22 @@ sequenceDiagram
         <div>
           <h4>Reset demo state</h4>
           <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem;word-break:break-all">docker exec fotopia-hr-agent-backend-1 python /app/scripts/demo_reset.py</p>
-          <p style="margin-top:0.25rem">Clears leave requests, approvals, audit log. Resets balances. Cleans Odoo synced leaves.</p>
+          <p style="margin-top:0.25rem">Clears leave requests, approvals, audit log. Resets leave balances. Removes synced Odoo leaves.</p>
         </div>
       </div>
       <div class="security-item">
         <span class="icon">2&#65039;&#8419;</span>
         <div>
-          <h4>Verify all containers running</h4>
-          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem">docker compose ps</p>
+          <h4>Verify containers healthy</h4>
+          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem">docker compose ps &amp;&amp; curl localhost:8000/health</p>
         </div>
       </div>
       <div class="security-item">
         <span class="icon">3&#65039;&#8419;</span>
         <div>
-          <h4>After a full restart — re-copy Odoo sync module</h4>
-          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem;word-break:break-all">docker cp backend/services/odoo_sync.py fotopia-hr-agent-backend-1:/app/services/odoo_sync.py</p>
-        </div>
-      </div>
-      <div class="security-item">
-        <span class="icon">4&#65039;&#8419;</span>
-        <div>
-          <h4>Health check</h4>
-          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem">curl localhost:8000/health</p>
+          <h4>Full environment rebuild (if needed)</h4>
+          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem;word-break:break-all">bash backend/scripts/reset_demo_environment.sh</p>
+          <p style="margin-top:0.25rem">Tears down volumes, restarts fresh, resyncs Odoo employees and allocations, reseeds documents.</p>
         </div>
       </div>
     </div>
@@ -1056,37 +1323,27 @@ sequenceDiagram
   </div>
 
   <div class="card">
-    <h3><span class="dot" style="background:#ef4444"></span>Open Business / Legal Items</h3>
-    <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:1rem">These are not engineering blockers for the demo. They block real-client production go-live.</p>
-    <table>
-      <thead><tr><th>#</th><th>Item</th><th>Owner</th><th>Blocks</th></tr></thead>
-      <tbody>
-        <tr>
-          <td>1</td>
-          <td><strong>Egypt PDPL cross-border transfer</strong> — does routing tenant data through Anthropic's cloud API require a PDPC license?</td>
-          <td>Dr. Ahmed / Raef</td>
-          <td>Real-client go-live (demo runs on synthetic data only)</td>
-        </tr>
-        <tr>
-          <td>2</td>
-          <td><strong>DPO appointment</strong> — PDPL requires a registered Data Protection Officer before processing salary and national ID at scale</td>
-          <td>Dr. Ahmed / Raef</td>
-          <td>Production launch with sensitive data</td>
-        </tr>
-        <tr>
-          <td>3</td>
-          <td><strong>HITL approval ownership</strong> — who is the designated human approver for onboarding gated actions (create_employee_record, enroll_social_insurance)?</td>
-          <td>Nourhan Hosny</td>
-          <td>Phase 3 onboarding state machine</td>
-        </tr>
-        <tr>
-          <td>4</td>
-          <td><strong>Anthropic ZDR agreement</strong> — Zero Data Retention to be signed in parallel with PDPL resolution</td>
-          <td>Dr. Ahmed / Raef</td>
-          <td>Real client data through cloud Claude</td>
-        </tr>
-      </tbody>
-    </table>
+    <h3><span class="dot" style="background:#06b6d4"></span>Hardware Requirements</h3>
+    <div class="hw-grid" style="margin-bottom:0">
+      <div class="hw-card">
+        <h4>Minimum — Development / Demo</h4>
+        <div class="hw-row"><span class="hw-label">CPU</span><span class="hw-val">2 vCPU (x86_64 or ARM64)</span></div>
+        <div class="hw-row"><span class="hw-label">RAM</span><span class="hw-val">4 GB</span></div>
+        <div class="hw-row"><span class="hw-label">Storage</span><span class="hw-val">20 GB SSD</span></div>
+        <div class="hw-row"><span class="hw-label">OS</span><span class="hw-val">macOS 13+ or Ubuntu 22.04</span></div>
+        <div class="hw-row"><span class="hw-label">Docker</span><span class="hw-val">Docker Desktop 4.x</span></div>
+        <div class="hw-row"><span class="hw-label">Network</span><span class="hw-val">10 Mbps broadband</span></div>
+      </div>
+      <div class="hw-card">
+        <h4>Recommended — Staging / Production</h4>
+        <div class="hw-row"><span class="hw-label">CPU</span><span class="hw-val">4 vCPU (x86_64)</span></div>
+        <div class="hw-row"><span class="hw-label">RAM</span><span class="hw-val">8 GB</span></div>
+        <div class="hw-row"><span class="hw-label">Storage</span><span class="hw-val">100 GB NVMe SSD</span></div>
+        <div class="hw-row"><span class="hw-label">OS</span><span class="hw-val">Ubuntu 22.04 LTS</span></div>
+        <div class="hw-row"><span class="hw-label">Docker</span><span class="hw-val">Docker Engine + Compose v2</span></div>
+        <div class="hw-row"><span class="hw-label">Network</span><span class="hw-val">100 Mbps, static IP</span></div>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -1123,7 +1380,7 @@ sequenceDiagram
       diagramMarginX:  20,
       diagramMarginY:  15,
       actorMargin:     40,
-      width:           160,
+      width:           150,
       height:          50,
       boxMargin:       10,
       boxTextMargin:   5,
