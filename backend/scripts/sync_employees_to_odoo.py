@@ -33,7 +33,7 @@ def get_our_employees():
             cur.execute(f"SET app.current_tenant_id = '{tenant_id}'")
             cur.execute("""
                 SELECT e.employee_code, e.full_name, e.email, e.position,
-                       e.department, e.gender, e.birth_date, e.start_date,
+                       e.department, e.birth_date, e.start_date,
                        COALESCE(u.role, 'employee') AS role
                 FROM employees e
                 LEFT JOIN users u ON u.employee_id = e.id AND u.tenant_id = e.tenant_id
@@ -55,9 +55,7 @@ def get_or_create_odoo_employee(models, db, uid, password, employee):
     if existing:
         return existing[0]['id'], False
     dept_id = DEPT_MAP.get(employee.get('department', ''))
-    gender_map = {'M': 'male', 'F': 'female'}
-    gender = gender_map.get(employee.get('gender', ''), 'other')
-    values = {'name': employee['full_name'], 'work_email': email, 'gender': gender}
+    values = {'name': employee['full_name'], 'work_email': email}
     if dept_id:
         values['department_id'] = dept_id
     if employee.get('birth_date'):

@@ -81,32 +81,45 @@ def _get_employees(uid, models):
 
 
 def _clear_model(uid, models, model_name, emp_ids):
-    """Refuse → draft → delete all records for emp_ids in model_name."""
-    record_ids = models.execute_kw(
+    """Delete all records for emp_ids in model_name, handling any approval state."""
+    records = models.execute_kw(
         config.ODOO_DB, uid, config.ODOO_PASSWORD,
-        model_name, "search",
+        model_name, "search_read",
         [[["employee_id", "in", emp_ids]]],
+        {"fields": ["id", "state"]},
     )
-    if not record_ids:
+    if not records:
         print(f"  {model_name}: no records found — skipping")
         return
 
+    record_ids = [r["id"] for r in records]
     print(f"  {model_name}: found {len(record_ids)} record(s) — clearing...")
 
-    for method in ("action_refuse", "action_draft"):
+    # State-machine transitions grouped by current state to avoid batch errors
+    needs_refuse = [r["id"] for r in records
+                    if r.get("state") in ("validate", "validate1", "confirm")]
+    needs_draft  = [r["id"] for r in records
+                    if r.get("state") in ("validate", "validate1", "confirm", "refuse")]
+
+    for ids, method in [(needs_refuse, "action_refuse"), (needs_draft, "action_draft")]:
+        if not ids:
+            continue
         try:
-            models.execute_kw(
-                config.ODOO_DB, uid, config.ODOO_PASSWORD,
-                model_name, method, [record_ids],
-            )
+            models.execute_kw(config.ODOO_DB, uid, config.ODOO_PASSWORD,
+                               model_name, method, [ids])
         except Exception as e:
             print(f"    {method}: {e} (continuing)")
 
+    # Fallback: force state to draft directly so unlink can proceed
     try:
-        models.execute_kw(
-            config.ODOO_DB, uid, config.ODOO_PASSWORD,
-            model_name, "unlink", [record_ids],
-        )
+        models.execute_kw(config.ODOO_DB, uid, config.ODOO_PASSWORD,
+                           model_name, "write", [record_ids, {"state": "draft"}])
+    except Exception as e:
+        print(f"    write(draft): {e} (continuing)")
+
+    try:
+        models.execute_kw(config.ODOO_DB, uid, config.ODOO_PASSWORD,
+                           model_name, "unlink", [record_ids])
         print(f"    ✓ Deleted {len(record_ids)} {model_name} record(s)")
     except Exception as e:
         print(f"    ✗ Delete failed: {e}")
@@ -121,7 +134,7 @@ def _create_allocations(uid, models, employees):
         email = emp.get("work_email", "")
         days = ANNUAL_ALLOCATIONS.get(email, DEFAULT_DAYS)
         try:
-            models.execute_kw(
+            alloc_id = models.execute_kw(
                 config.ODOO_DB, uid, config.ODOO_PASSWORD,
                 "hr.leave.allocation", "create",
                 [{
@@ -129,8 +142,11 @@ def _create_allocations(uid, models, employees):
                     "holiday_status_id": ANNUAL_LEAVE_TYPE_ID,
                     "number_of_days": days,
                     "name": "Annual Leave 2026",
-                    "state": "validate",
                 }],
+            )
+            models.execute_kw(
+                config.ODOO_DB, uid, config.ODOO_PASSWORD,
+                "hr.leave.allocation", "action_validate", [[alloc_id]],
             )
             created += 1
         except Exception as e:
