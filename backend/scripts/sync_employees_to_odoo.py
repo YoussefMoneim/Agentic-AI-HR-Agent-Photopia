@@ -33,7 +33,7 @@ def get_our_employees():
             cur.execute(f"SET app.current_tenant_id = '{tenant_id}'")
             cur.execute("""
                 SELECT e.employee_code, e.full_name, e.email, e.position,
-                       e.department, e.birth_date, e.start_date,
+                       e.department, e.start_date,
                        COALESCE(u.role, 'employee') AS role
                 FROM employees e
                 LEFT JOIN users u ON u.employee_id = e.id AND u.tenant_id = e.tenant_id
@@ -58,8 +58,6 @@ def get_or_create_odoo_employee(models, db, uid, password, employee):
     values = {'name': employee['full_name'], 'work_email': email}
     if dept_id:
         values['department_id'] = dept_id
-    if employee.get('birth_date'):
-        values['birthday'] = str(employee['birth_date'])
 
     odoo_id = models.execute_kw(db, uid, password, 'hr.employee', 'create', [values])
     return odoo_id, True
