@@ -11,6 +11,7 @@ outgoing message so the manager's email client threads replies with In-Reply-To.
 """
 import logging
 import smtplib
+import socket
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -26,16 +27,17 @@ def send_email(
     body_plain: str,
     message_id: str | None = None,
     in_reply_to: str | None = None,
+    reply_to: str | None = None,
 ) -> bool:
     """Send an email. Returns True on success, False on send failure."""
 
     # ── Path 1: Azure Communication Services ─────────────────────────────────
     if config.AZURE_COMMUNICATION_CONNECTION_STRING:
-        return _send_via_acs(to_email, subject, body_html, body_plain)
+        return _send_via_acs(to_email, subject, body_html, body_plain, reply_to)
 
     # ── Path 2: SMTP (smtplib, stdlib) ───────────────────────────────────────
     if config.SMTP_HOST and config.SMTP_USERNAME and config.SMTP_PASSWORD:
-        return _send_via_smtp(to_email, subject, body_html, body_plain, message_id, in_reply_to)
+        return _send_via_smtp(to_email, subject, body_html, body_plain, message_id, in_reply_to, reply_to)
 
     # ── Path 3: Mock (log only) ───────────────────────────────────────────────
     _log.info(
@@ -46,7 +48,8 @@ def send_email(
 
 
 def _send_via_acs(
-    to_email: str, subject: str, body_html: str, body_plain: str
+    to_email: str, subject: str, body_html: str, body_plain: str,
+    reply_to: str | None = None,
 ) -> bool:
     try:
         from azure.communication.email import EmailClient
@@ -62,6 +65,8 @@ def _send_via_acs(
             "recipients": {"to": [{"address": to_email}]},
             "senderAddress": config.AZURE_COMMUNICATION_SENDER_EMAIL,
         }
+        if reply_to:
+            message["replyTo"] = [{"address": reply_to}]
         poller = client.begin_send(message)
         result = poller.result()
         succeeded = result.get("status") == "Succeeded"
@@ -74,7 +79,7 @@ def _send_via_acs(
             "azure-communication-email not installed; re-entering SMTP/mock path"
         )
         if config.SMTP_HOST and config.SMTP_USERNAME and config.SMTP_PASSWORD:
-            return _send_via_smtp(to_email, subject, body_html, body_plain, None)
+            return _send_via_smtp(to_email, subject, body_html, body_plain, None, None, reply_to)
         _log.info("EMAIL [mock] TO=%s | SUBJECT=%s\n%s", to_email, subject, body_plain)
         return True
 
@@ -90,6 +95,7 @@ def _send_via_smtp(
     body_plain: str,
     message_id: str | None,
     in_reply_to: str | None = None,
+    reply_to: str | None = None,
 ) -> bool:
     try:
         msg = MIMEMultipart("alternative")
@@ -101,12 +107,17 @@ def _send_via_smtp(
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
             msg["References"] = in_reply_to
+        if reply_to:
+            msg["Reply-To"] = reply_to
 
         # Plain first, HTML last — RFC 2046 preference order (most capable client uses last)
         msg.attach(MIMEText(body_plain, "plain", "utf-8"))
         msg.attach(MIMEText(body_html, "html", "utf-8"))
 
-        with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT) as smtp:
+        # Force IPv4 — Docker has no IPv6 route; smtplib tries IPv6 first and crashes
+        _addrs = socket.getaddrinfo(config.SMTP_HOST, config.SMTP_PORT, socket.AF_INET, socket.SOCK_STREAM)
+        _smtp_ip = _addrs[0][4][0]
+        with smtplib.SMTP(_smtp_ip, config.SMTP_PORT) as smtp:
             smtp.ehlo()
             if config.SMTP_USE_STARTTLS:
                 smtp.starttls()

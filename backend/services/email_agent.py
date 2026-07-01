@@ -5,7 +5,7 @@ Security pipeline (must never be reordered):
   1. Loop detection  — header check only, zero DB access
   2. Identity check  — ds.get_employee_by_email()
   3. Rate limit      — ds.check_and_record_rate_limit()
-  4. Intent classify — keyword match, max 500 chars of body (no LLM)
+  4. Intent classify — LLM (Haiku) classification, keyword fallback on error
   5. Tool dispatch   — employee's real DB role via ToolRegistry.execute()
   6. Branded HTML reply — send_email(), never LLM-generated body text
 
@@ -13,21 +13,31 @@ Invariants:
   - send_email() is NEVER called for auto-reply, self-email, or unregistered senders
   - Rate-limited senders receive exactly ONE polite reply, then return
   - ctx.role always sourced from employees+users DB join, never from email content
-  - anthropic SDK never imported here (keyword classification has no LLM dependency)
+  - anthropic SDK imported lazily inside _classify_intent() only (via llm/claude.py)
 """
 from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import config
+from llm.claude import ClaudeProvider
 from services.email import send_email
 from tools.base import ToolContext
 
 if TYPE_CHECKING:
     from data.base import DataSource
     from tools.registry import ToolRegistry
+
+
+@dataclass
+class EmailIntent:
+    intent: str
+    confidence: str = "low"
+    extracted_params: dict = field(default_factory=dict)
+    reason: str = ""
 
 _log = logging.getLogger(__name__)
 
@@ -103,20 +113,91 @@ def _is_auto_reply(msg_headers: dict) -> bool:
 
 # ── Intent classification ─────────────────────────────────────────────────────
 
-def _classify_intent(body_text: str) -> str:
-    """Keyword-match the first 500 chars. Cancellation and policy checked before request."""
-    snippet = body_text[:_MAX_BODY_CHARS].lower()
-    if any(kw in snippet for kw in _LEAVE_CANCELLATION_KEYWORDS):
-        return "leave_cancellation"
-    if any(kw in snippet for kw in _POLICY_KEYWORDS):
-        return "policy_question"
-    if any(kw in snippet for kw in _LEAVE_REQUEST_KEYWORDS):
-        return "leave_request"
-    if any(kw in snippet for kw in _BALANCE_KEYWORDS):
-        return "leave_balance"
-    if any(kw in snippet for kw in _STATUS_KEYWORDS):
-        return "leave_status"
-    return "unknown"
+def _classify_intent(body_text: str, subject: str = "") -> EmailIntent:
+    """
+    Classify email intent using Claude Haiku LLM.
+
+    SECURITY: Only passes subject + first 500 chars of body to LLM.
+    FAIL CLOSED: Any error returns intent='unknown' via keyword fallback — never crashes.
+    LLM extracts dates and leave type — no regex needed in handlers when successful.
+    """
+    import json
+
+    safe_subject = (subject or "")[:200]
+    safe_body = (body_text or "")[:500]
+
+    prompt = f"""You are an HR email classifier. Classify this email and extract key information.
+
+Subject: {safe_subject}
+Body: {safe_body}
+
+Respond with ONLY valid JSON, no markdown, no explanation:
+{{
+  "intent": "leave_request" | "leave_cancellation" | "balance_check" | "leave_status" | "policy_question" | "unknown",
+  "confidence": "high" | "medium" | "low",
+  "extracted_params": {{
+    "leave_type": "annual" | "sick" | "casual" | "maternity" | "paternity" | "hajj" | "umrah" | "marriage" | "funeral_1st_degree" | "funeral_2nd_degree" | "educational" | "military" | "compensatory_off" | "unpaid" | null,
+    "start_date": "YYYY-MM-DD or null",
+    "end_date": "YYYY-MM-DD or null",
+    "reason": "reason text or null"
+  }},
+  "reason": "one sentence explaining this classification"
+}}
+
+Rules:
+- "I want a holiday / leave / time off / vacation / break" → leave_request
+- "first two weeks of August" → start_date: current year August 1, end_date: August 14
+- "next week" → approximate from today's date (today is {__import__('datetime').date.today()})
+- "cancel my leave / withdraw / don't need leave anymore" → leave_cancellation
+- "what is my balance / how many days do I have" → balance_check
+- "status of my request / is my leave approved" → leave_status
+- "what is the policy / how many days do I get" → policy_question
+- Greetings, unrelated, unclear with low confidence → unknown
+- Default leave_type to "annual" if employee says "holiday" or "vacation" or "leave" without specifying type
+- If dates are mentioned in any natural language form, convert to YYYY-MM-DD format"""
+
+    try:
+        provider = ClaudeProvider(
+            api_key=config.ANTHROPIC_API_KEY,
+            model="claude-haiku-4-5-20251001",
+        )
+        response = provider.classify(
+            system_prompt="You are an HR email classifier. Respond only with valid JSON.",
+            user_text=prompt,
+        )
+        clean = response.strip()
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        data = json.loads(clean.strip())
+        return EmailIntent(
+            intent=data.get("intent", "unknown"),
+            confidence=data.get("confidence", "low"),
+            extracted_params=data.get("extracted_params") or {},
+            reason=data.get("reason", ""),
+        )
+    except Exception as e:
+        _log.warning("LLM intent classification failed (falling back to keywords): %s", e)
+        snippet = (body_text or "")[:_MAX_BODY_CHARS].lower()
+        if any(kw in snippet for kw in _LEAVE_CANCELLATION_KEYWORDS):
+            kw_intent = "leave_cancellation"
+        elif any(kw in snippet for kw in _POLICY_KEYWORDS):
+            kw_intent = "policy_question"
+        elif any(kw in snippet for kw in _LEAVE_REQUEST_KEYWORDS):
+            kw_intent = "leave_request"
+        elif any(kw in snippet for kw in _BALANCE_KEYWORDS):
+            kw_intent = "balance_check"
+        elif any(kw in snippet for kw in _STATUS_KEYWORDS):
+            kw_intent = "leave_status"
+        else:
+            kw_intent = "unknown"
+        return EmailIntent(
+            intent=kw_intent,
+            confidence="low",
+            extracted_params={},
+            reason="Keyword fallback (LLM unavailable)",
+        )
 
 
 # ── Context builder ───────────────────────────────────────────────────────────
@@ -393,71 +474,79 @@ def _handle_policy_question(
 
 
 def _handle_leave_request(
-    ctx: ToolContext, registry: "ToolRegistry", name: str, body_text: str
+    ctx: ToolContext, registry: "ToolRegistry", name: str, body_text: str,
+    extracted_params: dict | None = None,
 ) -> tuple[str, str, str, str, str]:
     """Attempt to submit a leave request from email content.
     If dates can't be parsed, returns a clarification template.
     Never bypasses the constraint engine.
     """
-    import re
+    params = extracted_params or {}
+    llm_leave_type = params.get("leave_type")
+    leave_type_code = llm_leave_type or "annual"
+    start_date = params.get("start_date")
+    end_date = params.get("end_date")
+    reason = params.get("reason") or "Submitted via email"
 
-    snippet = body_text[:_MAX_BODY_CHARS].lower()
+    if not start_date or not end_date:
+        import re
+        snippet = body_text[:_MAX_BODY_CHARS].lower()
 
-    date_patterns = [
-        r'\b(\d{4}-\d{2}-\d{2})\b',
-        r'\b(\d{1,2}/\d{1,2}/\d{4})\b',
-        r'\b(\d{1,2}/\d{1,2})\b',
-    ]
-    found_dates = []
-    for pattern in date_patterns:
-        found_dates.extend(re.findall(pattern, snippet))
+        date_patterns = [
+            r'\b(\d{4}-\d{2}-\d{2})\b',
+            r'\b(\d{1,2}/\d{1,2}/\d{4})\b',
+            r'\b(\d{1,2}/\d{1,2})\b',
+        ]
+        found_dates = []
+        for pattern in date_patterns:
+            found_dates.extend(re.findall(pattern, snippet))
 
-    leave_type_code = "annual"
-    if any(kw in snippet for kw in ("sick", "medical", "ill", "doctor")):
-        leave_type_code = "sick"
-    elif "casual" in snippet:
-        leave_type_code = "casual"
-    elif "maternity" in snippet:
-        leave_type_code = "maternity"
-    elif "hajj" in snippet:
-        leave_type_code = "hajj"
-    elif "umrah" in snippet:
-        leave_type_code = "umrah"
+        if not llm_leave_type:
+            if any(kw in snippet for kw in ("sick", "medical", "ill", "doctor")):
+                leave_type_code = "sick"
+            elif "casual" in snippet:
+                leave_type_code = "casual"
+            elif "maternity" in snippet:
+                leave_type_code = "maternity"
+            elif "hajj" in snippet:
+                leave_type_code = "hajj"
+            elif "umrah" in snippet:
+                leave_type_code = "umrah"
 
-    if len(found_dates) < 2:
-        html = (
-            f"<p style='color:#444;font-size:14px'>Dear {name},<br><br>"
-            f"Thank you for your leave request. To submit it on your behalf, "
-            f"I need a few more details:</p>"
-            f"<div style='background:#f8f8fb;border-radius:6px;padding:16px;font-size:14px'>"
-            f"<p style='margin:0 0 8px 0;font-weight:bold;color:#1a1a2e'>Please reply with:</p>"
-            f"<ul style='margin:0;padding-left:20px;color:#444;line-height:2.2'>"
-            f"<li><strong>Leave type</strong> &mdash; Annual, Sick, Casual, Hajj, etc.</li>"
-            f"<li><strong>Start date</strong> &mdash; e.g. 2026-07-21</li>"
-            f"<li><strong>End date</strong> &mdash; e.g. 2026-07-23</li>"
-            f"<li><strong>Reason</strong> &mdash; optional</li>"
-            f"</ul></div>"
-            f"<p style='color:#888;font-size:12px;margin-top:16px'>"
-            f"Or log into the HR portal to submit directly.</p>"
-        )
-        plain = (
-            f"Dear {name},\n\nTo submit your leave request, please provide:\n"
-            f"- Leave type (Annual, Sick, etc.)\n"
-            f"- Start date (e.g. 2026-07-21)\n"
-            f"- End date\n"
-            f"- Reason (optional)\n\n"
-            f"Or log into the HR portal."
-        )
-        return "Leave Request — Details Needed", "📅", "#c9a84c", html, plain
+        if len(found_dates) < 2:
+            html = (
+                f"<p style='color:#444;font-size:14px'>Dear {name},<br><br>"
+                f"Thank you for your leave request. To submit it on your behalf, "
+                f"I need a few more details:</p>"
+                f"<div style='background:#f8f8fb;border-radius:6px;padding:16px;font-size:14px'>"
+                f"<p style='margin:0 0 8px 0;font-weight:bold;color:#1a1a2e'>Please reply with:</p>"
+                f"<ul style='margin:0;padding-left:20px;color:#444;line-height:2.2'>"
+                f"<li><strong>Leave type</strong> &mdash; Annual, Sick, Casual, Hajj, etc.</li>"
+                f"<li><strong>Start date</strong> &mdash; e.g. 2026-07-21</li>"
+                f"<li><strong>End date</strong> &mdash; e.g. 2026-07-23</li>"
+                f"<li><strong>Reason</strong> &mdash; optional</li>"
+                f"</ul></div>"
+                f"<p style='color:#888;font-size:12px;margin-top:16px'>"
+                f"Or log into the HR portal to submit directly.</p>"
+            )
+            plain = (
+                f"Dear {name},\n\nTo submit your leave request, please provide:\n"
+                f"- Leave type (Annual, Sick, etc.)\n"
+                f"- Start date (e.g. 2026-07-21)\n"
+                f"- End date\n"
+                f"- Reason (optional)\n\n"
+                f"Or log into the HR portal."
+            )
+            return "Leave Request — Details Needed", "📅", "#c9a84c", html, plain
 
-    start_date = found_dates[0]
-    end_date = found_dates[1]
+        start_date = found_dates[0]
+        end_date = found_dates[1]
 
     tool_result = registry.execute("submit_leave_request", {
         "leave_type_code": leave_type_code,
         "start_date": start_date,
         "end_date": end_date,
-        "reason": "Submitted via email",
+        "reason": reason,
     }, ctx)
 
     if tool_result.success:
@@ -665,14 +754,18 @@ def process_employee_email(
         return
 
     # 4. Classify intent
-    intent = _classify_intent(body_text)
-    _log.info("email_agent: from=%s intent=%s", from_email, intent)
+    intent_result = _classify_intent(body_text, subject=msg_headers.get("subject", ""))
+    intent = intent_result.intent
+    _log.info(
+        "email_agent: from=%s intent=%s confidence=%s",
+        from_email, intent, intent_result.confidence,
+    )
 
     # 5. Dispatch to tool using employee's real DB role
     ctx = _build_context(employee, tenant_id)
     registry = _get_registry(ds)
 
-    if intent == "leave_balance":
+    if intent == "balance_check":
         title, icon, color, html, plain = _handle_leave_balance(ctx, registry, display_name)
     elif intent == "leave_status":
         title, icon, color, html, plain = _handle_leave_status(ctx, registry, display_name)
@@ -682,7 +775,8 @@ def process_employee_email(
         )
     elif intent == "leave_request":
         title, icon, color, html, plain = _handle_leave_request(
-            ctx, registry, display_name, body_text
+            ctx, registry, display_name, body_text,
+            extracted_params=intent_result.extracted_params,
         )
     elif intent == "leave_cancellation":
         title, icon, color, html, plain = _handle_leave_cancellation(display_name)

@@ -202,5 +202,77 @@ class TestApprovalToolOdooIntegration(unittest.TestCase):
                       "ApproveLeaveRequestTool must call sync_approved_leave")
 
 
+class TestOdooSyncCancellation(unittest.TestCase):
+
+    def test_sync_cancelled_leave_skipped_when_odoo_disabled(self):
+        with patch("config.ODOO_ENABLED", False):
+            from services.odoo_sync import sync_cancelled_leave
+            result = sync_cancelled_leave(
+                employee_email="test@example.com",
+                leave_type_code="annual",
+                start_date="2026-07-01",
+                end_date="2026-07-05",
+                our_request_id="test-cancel-id",
+            )
+        self.assertTrue(result["skipped"])
+        self.assertFalse(result["synced"])
+        self.assertIsNone(result["error"])
+
+    def test_sync_cancelled_leave_no_match_returns_synced_true(self):
+        import services.odoo_sync as odoo_sync_mod
+        mock_client = MagicMock()
+        mock_client.search_read.return_value = []
+        with (
+            patch.object(odoo_sync_mod, "_get_client", return_value=mock_client),
+            patch.object(odoo_sync_mod, "find_odoo_employee", return_value=42),
+            patch.object(odoo_sync_mod, "find_odoo_leave_type", return_value=7),
+        ):
+            result = odoo_sync_mod.sync_cancelled_leave(
+                employee_email="test@example.com",
+                leave_type_code="annual",
+                start_date="2026-07-01",
+                end_date="2026-07-05",
+                our_request_id="test-cancel-id",
+            )
+        self.assertTrue(result["synced"])
+        self.assertIsNone(result["odoo_leave_id"])
+        self.assertFalse(result["skipped"])
+        mock_client.action.assert_not_called()
+
+    def test_sync_cancelled_leave_refuses_and_deletes_validated_leave(self):
+        import services.odoo_sync as odoo_sync_mod
+        mock_client = MagicMock()
+        mock_client.search_read.return_value = [
+            {
+                "id": 99,
+                "state": "validate",
+                "date_from": "2026-07-01 08:00:00",
+                "date_to": "2026-07-05 17:00:00",
+                "employee_id": [42, "Test Employee"],
+            }
+        ]
+        mock_client.action.return_value = True
+        with (
+            patch.object(odoo_sync_mod, "_get_client", return_value=mock_client),
+            patch.object(odoo_sync_mod, "find_odoo_employee", return_value=42),
+            patch.object(odoo_sync_mod, "find_odoo_leave_type", return_value=7),
+        ):
+            result = odoo_sync_mod.sync_cancelled_leave(
+                employee_email="test@example.com",
+                leave_type_code="annual",
+                start_date="2026-07-01",
+                end_date="2026-07-05",
+                our_request_id="test-cancel-id",
+            )
+        self.assertTrue(result["synced"])
+        self.assertEqual(result["odoo_leave_id"], 99)
+        self.assertIsNone(result["error"])
+        self.assertFalse(result["skipped"])
+        called_methods = [c[0][2] for c in mock_client.action.call_args_list]
+        self.assertIn("action_refuse", called_methods)
+        self.assertIn("action_draft", called_methods)
+        self.assertIn("unlink", called_methods)
+
+
 if __name__ == "__main__":
     unittest.main()

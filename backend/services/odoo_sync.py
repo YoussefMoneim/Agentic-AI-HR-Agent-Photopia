@@ -211,6 +211,132 @@ def sync_approved_leave(
         return {"synced": False, "odoo_leave_id": None, "error": str(e), "skipped": False}
 
 
+def sync_cancelled_leave(
+    employee_email: str,
+    leave_type_code: str,
+    start_date: str,
+    end_date: str,
+    our_request_id: str,
+) -> dict:
+    """
+    Find and refuse/delete the corresponding Odoo hr.leave record when a leave
+    is cancelled in our system.
+
+    Lookup: employee + leave type + overlapping dates + non-refused states.
+    No match → log and return synced=True (record may have been manually deleted
+    in Odoo, or sync originally failed — both are acceptable outcomes).
+
+    NEVER blocks or rolls back our cancellation.
+    Returns same shape as sync_approved_leave(): {synced, odoo_leave_id, error, skipped}
+    """
+    client = _get_client()
+    if client is None:
+        return {"synced": False, "odoo_leave_id": None, "error": None, "skipped": True}
+
+    try:
+        odoo_employee_id = find_odoo_employee(client, employee_email)
+        if not odoo_employee_id:
+            _log.warning(
+                "Odoo cancel sync: employee not found for %s (request %s)",
+                employee_email, our_request_id,
+            )
+            return {
+                "synced": False,
+                "odoo_leave_id": None,
+                "error": f"Employee {employee_email} not found in Odoo",
+                "skipped": False,
+            }
+
+        odoo_leave_type_id = find_odoo_leave_type(client, leave_type_code)
+        if not odoo_leave_type_id:
+            _log.warning(
+                "Odoo cancel sync: leave type not found for code %s", leave_type_code
+            )
+            return {
+                "synced": False,
+                "odoo_leave_id": None,
+                "error": f"Leave type {leave_type_code} not found in Odoo",
+                "skipped": False,
+            }
+
+        domain = [
+            ["employee_id", "=", odoo_employee_id],
+            ["holiday_status_id", "=", odoo_leave_type_id],
+            ["date_from", "<=", f"{end_date} 23:59:59"],
+            ["date_to", ">=", f"{start_date} 00:00:00"],
+            ["state", "in", ["validate", "validate1", "confirm", "draft"]],
+        ]
+        matches = client.search_read(
+            "hr.leave", domain,
+            ["id", "state", "date_from", "date_to", "employee_id"],
+            limit=5,
+        )
+
+        if not matches:
+            _log.info(
+                "Odoo cancel sync: no matching leave found for employee %s "
+                "dates %s to %s — skipping (may have been manually deleted)",
+                employee_email, start_date, end_date,
+            )
+            return {"synced": True, "odoo_leave_id": None, "error": None, "skipped": False}
+
+        odoo_leave = matches[0]
+        odoo_leave_id = odoo_leave["id"]
+        odoo_state = odoo_leave["state"]
+        _log.info(
+            "Odoo cancel sync: found leave id=%d state=%s for request %s",
+            odoo_leave_id, odoo_state, our_request_id,
+        )
+
+        if odoo_state in ("validate", "validate1", "confirm"):
+            try:
+                client.action("hr.leave", [odoo_leave_id], "action_refuse")
+                _log.info("Odoo cancel sync: refused leave id=%d", odoo_leave_id)
+            except Exception as refuse_err:
+                _log.warning(
+                    "Odoo cancel sync: could not refuse leave %d: %s — "
+                    "attempting deletion anyway",
+                    odoo_leave_id, refuse_err,
+                )
+
+        try:
+            client.action("hr.leave", [odoo_leave_id], "action_draft")
+            _log.info("Odoo cancel sync: reset to draft leave id=%d", odoo_leave_id)
+        except Exception as draft_err:
+            _log.debug(
+                "Odoo cancel sync: action_draft failed for %d: %s "
+                "(may already be in draft/refused state — continuing)",
+                odoo_leave_id, draft_err,
+            )
+
+        try:
+            client.action("hr.leave", [odoo_leave_id], "unlink")
+            _log.info(
+                "Odoo cancel sync: deleted leave id=%d for request %s",
+                odoo_leave_id, our_request_id,
+            )
+        except Exception as unlink_err:
+            _log.warning(
+                "Odoo cancel sync: could not delete leave %d: %s — "
+                "left in refused state (balance restored; HR can clean up manually)",
+                odoo_leave_id, unlink_err,
+            )
+            return {
+                "synced": True,
+                "odoo_leave_id": odoo_leave_id,
+                "error": str(unlink_err),
+                "skipped": False,
+            }
+
+        return {"synced": True, "odoo_leave_id": odoo_leave_id, "error": None, "skipped": False}
+
+    except Exception as e:
+        _log.error(
+            "Odoo cancel sync failed for request %s: %s", our_request_id, e
+        )
+        return {"synced": False, "odoo_leave_id": None, "error": str(e), "skipped": False}
+
+
 def sync_leave_allocation(
     employee_email: str,
     leave_type_code: str,

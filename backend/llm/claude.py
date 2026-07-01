@@ -46,7 +46,7 @@ class ClaudeProvider(LLMProvider):
         """Single-turn classification using claude-haiku-4-5 (cheapest tier)."""
         message = self._client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=200,
+            max_tokens=400,
             system=system_prompt,
             messages=[{"role": "user", "content": user_text}],
         )

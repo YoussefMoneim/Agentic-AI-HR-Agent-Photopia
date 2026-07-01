@@ -402,7 +402,7 @@ def resolve_leave_request(
         if emp and emp.get("email"):
             status_word = "approved" if decision == "approved" else "rejected"
             email_svc.send_email(
-                to_email=emp["email"],
+                to_email=emp.get("notification_email") or emp["email"],
                 subject=f"Leave Request {status_word.capitalize()} — {emp['full_name']}",
                 body_html=(
                     f"<p>Your leave request ({days:.0f} days) has been "

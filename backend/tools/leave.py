@@ -1066,6 +1066,7 @@ class SubmitLeaveRequestTool(Tool):
             body_html=body_html,
             body_plain=body_plain,
             message_id=outbound_message_id,
+            reply_to=config.IMAP_USERNAME,
         )
 
         # Warn about medical certificate if sick leave > threshold
@@ -1342,15 +1343,58 @@ class ApproveLeaveRequestTool(Tool):
         # Notify employee
         employee = self._ds.get_employee_by_code(ctx.tenant_id, lr["employee_code"])
         if employee and employee.get("email"):
-            date_info = (
-                f"{lr['start_date']} to {lr['end_date']}"
-                if lr.get("start_date") else f"{lr.get('duration_hours')} hours"
+            emp_name   = employee.get("full_name") or employee["email"]
+            mgr_name   = mgr_employee.get("full_name", "Your manager") if mgr_employee else "HR"
+            leave_type = lr["leave_type_name"]
+            start_date = str(lr.get("start_date", ""))
+            end_date   = str(lr.get("end_date", ""))
+            days_n     = lr.get("days_requested")
+            duration   = (
+                f"{float(days_n):.0f} day{'s' if float(days_n) != 1 else ''}"
+                if days_n else f"{lr.get('duration_hours', '?')} hours"
+            )
+            body_html = (
+                '<html><body style="font-family:Arial,sans-serif;background:#f4f4f7;margin:0;padding:20px">'
+                '<div style="max-width:480px;margin:0 auto">'
+                '<div style="background:#0a0c1a;padding:16px 24px;border-radius:8px 8px 0 0;text-align:center">'
+                '<div style="color:#fff;font-size:16px;font-weight:bold">Fotopia HR System</div>'
+                '<div style="color:#c9a84c;font-size:11px;margin-top:4px">WIN Holding Group</div>'
+                '</div>'
+                '<div style="background:#fff;padding:32px 28px;border-radius:0 0 8px 8px">'
+                '<div style="font-size:36px;text-align:center;margin-bottom:16px;color:#16a34a">&#10003;</div>'
+                '<h2 style="margin:0 0 8px 0;color:#16a34a;font-size:20px;text-align:center">Leave Request Approved</h2>'
+                f'<p style="margin:0 0 20px 0;color:#555;font-size:14px;line-height:1.6;text-align:center">'
+                f'Dear {emp_name}, your leave request has been approved.</p>'
+                '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:20px">'
+                '<tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Leave Type</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{leave_type}</td>'
+                '</tr><tr>'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Period</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{start_date} &rarr; {end_date}</td>'
+                '</tr><tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Duration</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{duration}</td>'
+                '</tr><tr>'
+                '<td style="padding:10px 14px;color:#666">Approved by</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e">{mgr_name}</td>'
+                '</tr></table>'
+                '<p style="margin:0;font-size:11px;color:#aaa;text-align:center">Fotopia HR System &mdash; Automated notification</p>'
+                '</div></div></body></html>'
+            )
+            body_plain = (
+                f"Dear {emp_name},\n\n"
+                f"Your {leave_type} leave request has been approved.\n\n"
+                f"Period: {start_date} to {end_date}\n"
+                f"Duration: {duration}\n"
+                f"Approved by: {mgr_name}\n\n"
+                "Fotopia HR System — Automated notification"
             )
             email_svc.send_email(
-                to_email=employee["email"],
-                subject=f"Leave Request Approved — {lr['leave_type_name']}",
-                body_html=f"<p>Your {lr['leave_type_name']} request ({date_info}) has been approved by your manager.</p>",
-                body_plain=f"Your {lr['leave_type_name']} request ({date_info}) has been approved by your manager.",
+                to_email=employee.get("notification_email") or employee["email"],
+                subject=f"Leave Request Approved — {leave_type}",
+                body_html=body_html,
+                body_plain=body_plain,
             )
 
         # Odoo sync — non-blocking, never rolls back the approval
@@ -1501,16 +1545,66 @@ class RejectLeaveRequestTool(Tool):
         # Notify employee
         employee = self._ds.get_employee_by_code(ctx.tenant_id, lr["employee_code"])
         if employee and employee.get("email"):
-            date_info = (
-                f"{lr['start_date']} to {lr['end_date']}"
-                if lr.get("start_date") else f"{lr.get('duration_hours')} hours"
+            emp_name   = employee.get("full_name") or employee["email"]
+            mgr_name   = mgr_employee.get("full_name", "Your manager") if mgr_employee else "HR"
+            leave_type = lr["leave_type_name"]
+            start_date = str(lr.get("start_date", ""))
+            end_date   = str(lr.get("end_date", ""))
+            days_n     = lr.get("days_requested")
+            duration   = (
+                f"{float(days_n):.0f} day{'s' if float(days_n) != 1 else ''}"
+                if days_n else f"{lr.get('duration_hours', '?')} hours"
             )
             safe_comment = sanitize_for_html_email(comment)
+            reason_row_html = (
+                '<tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666">Reason</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e">{safe_comment}</td>'
+                '</tr>'
+            ) if comment else ''
+            body_html = (
+                '<html><body style="font-family:Arial,sans-serif;background:#f4f4f7;margin:0;padding:20px">'
+                '<div style="max-width:480px;margin:0 auto">'
+                '<div style="background:#0a0c1a;padding:16px 24px;border-radius:8px 8px 0 0;text-align:center">'
+                '<div style="color:#fff;font-size:16px;font-weight:bold">Fotopia HR System</div>'
+                '<div style="color:#c9a84c;font-size:11px;margin-top:4px">WIN Holding Group</div>'
+                '</div>'
+                '<div style="background:#fff;padding:32px 28px;border-radius:0 0 8px 8px">'
+                '<div style="font-size:36px;text-align:center;margin-bottom:16px;color:#dc2626">&#10007;</div>'
+                '<h2 style="margin:0 0 8px 0;color:#dc2626;font-size:20px;text-align:center">Leave Request Rejected</h2>'
+                f'<p style="margin:0 0 20px 0;color:#555;font-size:14px;line-height:1.6;text-align:center">'
+                f'Dear {emp_name}, your leave request has been rejected.</p>'
+                '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:20px">'
+                '<tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Leave Type</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{leave_type}</td>'
+                '</tr><tr>'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Period</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{start_date} &rarr; {end_date}</td>'
+                '</tr><tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Duration</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{duration}</td>'
+                '</tr><tr>'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Rejected by</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{mgr_name}</td>'
+                f'</tr>{reason_row_html}</table>'
+                '<p style="margin:0;font-size:11px;color:#aaa;text-align:center">Fotopia HR System &mdash; Automated notification</p>'
+                '</div></div></body></html>'
+            )
+            body_plain = (
+                f"Dear {emp_name},\n\n"
+                f"Your {leave_type} leave request has been rejected.\n\n"
+                f"Period: {start_date} to {end_date}\n"
+                f"Duration: {duration}\n"
+                f"Rejected by: {mgr_name}\n"
+                + (f"Reason: {comment}\n" if comment else "")
+                + "\nFotopia HR System — Automated notification"
+            )
             email_svc.send_email(
-                to_email=employee["email"],
-                subject=f"Leave Request Rejected — {lr['leave_type_name']}",
-                body_html=f"<p>Your {lr['leave_type_name']} request ({date_info}) was rejected. Reason: {safe_comment}</p>",
-                body_plain=f"Your {lr['leave_type_name']} request ({date_info}) was rejected. Reason: {comment}",
+                to_email=employee.get("notification_email") or employee["email"],
+                subject=f"Leave Request Rejected — {leave_type}",
+                body_html=body_html,
+                body_plain=body_plain,
             )
 
         result_data: dict = {
@@ -1919,6 +2013,30 @@ class ApproveLeaveCancellationTool(Tool):
         )
         if not result.get("success"):
             return ToolResult(success=False, error=result.get("error", "Cancellation approval failed."))
+
+        # Odoo cancel sync — non-blocking, never rolls back the cancellation
+        try:
+            import logging as _odoo_log
+            from services.odoo_sync import sync_cancelled_leave
+            _lr = self._ds.get_leave_request_by_id(ctx.tenant_id, request_id)
+            _odoo_emp = self._ds.get_employee_by_code(ctx.tenant_id, _lr["employee_code"]) if _lr else None
+            _odoo_email = _odoo_emp.get("email") if _odoo_emp else None
+            if _odoo_email and _lr:
+                _odoo_cancel = sync_cancelled_leave(
+                    employee_email=_odoo_email,
+                    leave_type_code=_lr.get("leave_type_code", ""),
+                    start_date=str(_lr.get("start_date", "")),
+                    end_date=str(_lr.get("end_date", "")),
+                    our_request_id=request_id,
+                )
+                if not _odoo_cancel.get("skipped") and not _odoo_cancel.get("synced"):
+                    _odoo_log.getLogger(__name__).warning(
+                        "Odoo cancel sync failed (non-blocking): %s",
+                        _odoo_cancel.get("error"),
+                    )
+        except Exception as _odoo_err:
+            import logging as _odoo_log
+            _odoo_log.getLogger(__name__).error("Odoo cancel sync exception (non-blocking): %s", _odoo_err)
 
         # Notify employee
         emp_email = result.get("employee_email")

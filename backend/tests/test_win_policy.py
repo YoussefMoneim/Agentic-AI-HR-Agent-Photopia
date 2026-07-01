@@ -42,9 +42,18 @@ FUNERAL_END_3   = "2026-06-30"   # 3 calendar days (max for 1st degree)
 FUNERAL_END_4   = "2026-07-01"   # 4 calendar days (exceeds 1st-degree max)
 FUNERAL_END_2   = "2026-06-29"   # 2 calendar days (exceeds 2nd-degree max of 1)
 
-CASUAL_START    = str(date.today() + timedelta(days=3))  # 3 days ahead — passes ≤3-day notice
-CASUAL_END_2    = str(date.today() + timedelta(days=4))  # 2-day span from CASUAL_START
-CASUAL_END_3    = str(date.today() + timedelta(days=5))  # 3-day span from CASUAL_START
+def _working_days_from_today(n: int) -> str:
+    d = date.today()
+    count = 0
+    while count < n:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            count += 1
+    return str(d)
+
+CASUAL_START = _working_days_from_today(3)  # 3rd working day — passes ≤3-day notice
+CASUAL_END_2 = _working_days_from_today(4)  # 4th working day — 2-day span from CASUAL_START
+CASUAL_END_3 = _working_days_from_today(5)  # 5th working day — 3-day span from CASUAL_START
 
 # Dates far enough ahead to pass 7-working-day notice requirement (>3-day annual)
 AHEAD_START     = "2026-08-10"   # Monday well past July 7 notice deadline

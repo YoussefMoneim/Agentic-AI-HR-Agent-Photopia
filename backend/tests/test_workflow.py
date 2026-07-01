@@ -74,7 +74,7 @@ class TestIdempotencyKey:
         emp_ctx = ctx(role="employee")
         result1 = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-01", "end_date": "2026-07-03",
+            {"leave_type_code": "annual", "start_date": "2026-07-15", "end_date": "2026-07-17",
              "reason": "holiday"},
             emp_ctx,
         )

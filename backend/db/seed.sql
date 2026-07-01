@@ -31,7 +31,8 @@ FROM fotopia, (VALUES
     ('FT-2022-007','Maryam Al Falasi','Senior Finance Analyst','Finance','F','1991-07-30','2022-06-01','29107301234567',24000,'maryam.falasi@fotopiatech.com','+20-100-001-0012'),
     ('FT-2022-008','Rashed Al Blooshi','DevOps Lead','Engineering','M','1989-05-16','2022-07-15','28905161345678',29000,'rashed.blooshi@fotopiatech.com','+20-100-001-0013'),
     ('FT-2022-009','Fatima Al Suwaidi','Senior UI/UX Designer','Product','F','1992-01-24','2022-02-20','29201241456789',25000,'fatima.suwaidi@fotopiatech.com','+20-100-001-0014'),
-    ('FT-2022-010','Saif Ahmed','Mobile Engineer','Engineering','M','1995-08-09','2022-11-01','29508091567890',24000,'saif.ahmed@fotopiatech.com','+20-100-001-0015'),
+    ('FT-2022-010','Youssef Abdelmoneim','Mobile Engineer','Engineering','M','1995-08-09','2022-11-01','29508091567890',24000,'i-youssef.abdelmoneim@fotopiatech.com','+20-100-001-0015'),
+    ('FT-2022-011','Saif Ahmed','Mobile Engineer','Engineering','M','1995-08-09','2022-11-01','29508091567891',24000,'i-saif.ahmed@fotopiatech.com','+20-100-001-0026'),
     ('FT-2023-001','Layla Al Qassimi','Data Analyst','Engineering','F','1996-04-22','2023-01-15','29604221678901',22000,'layla.qassimi@fotopiatech.com','+20-100-001-0016'),
     ('FT-2023-002','Hamdan Al Nuaimi','Sales Executive','Sales','M','1997-11-13','2023-03-01','29711131789012',19000,'hamdan.nuaimi@fotopiatech.com','+20-100-001-0017'),
     ('FT-2023-003','Shaikha Al Ketbi','Graphic Designer','Product','F','1998-06-30','2023-04-10','29806301890123',18000,'shaikha.ketbi@fotopiatech.com','+20-100-001-0018'),
@@ -56,7 +57,7 @@ WHERE e.employee_code IN ('FT-2021-002','FT-2021-003','FT-2022-001','FT-2022-002
 -- Reporting to Engineering Director (FT-2021-002 — Khalid Al Hashmi)
 UPDATE employees e
 SET manager_id = (SELECT id FROM employees WHERE employee_code = 'FT-2021-002' AND tenant_id = e.tenant_id)
-WHERE e.employee_code IN ('FT-2021-004','FT-2022-006','FT-2022-008','FT-2022-010','FT-2023-001','FT-2024-001','FT-2024-002','FT-2026-001')
+WHERE e.employee_code IN ('FT-2021-004','FT-2022-006','FT-2022-008','FT-2022-010','FT-2022-011','FT-2023-001','FT-2024-001','FT-2024-002','FT-2026-001')
   AND e.tenant_id = (SELECT id FROM tenants WHERE slug = 'fotopia');
 
 -- Reporting to HR Director (FT-2021-003 — Noura Al Rashidi)
@@ -517,14 +518,23 @@ $doc2$;
     ON CONFLICT (id) DO NOTHING;
 END $$;
 
--- Route approval-request notifications for managers/admin to the shared HR Gmail inbox.
--- employees.email stays as @fotopiatech.com (real work email — used by Odoo sync for matching).
--- notification_email is the override destination for outgoing HR notification emails only.
+-- ── Notification email routing (demo) ─────────────────────────────────────
+-- Routes HR approval notifications to the shared fotoagent inbox.
+-- employees.email stays as @fotopiatech.com (Odoo sync key — not changed here).
+-- notification_email is the delivery override for outgoing HR notification emails.
 UPDATE employees
-SET notification_email = 'hr.agent.fotopia@gmail.com'
-WHERE employee_code IN (
-    'FT-2021-001', 'FT-2021-002', 'FT-2021-003',
-    'FT-2022-001', 'FT-2022-002', 'FT-2022-003',
-    'FT-2022-004', 'FT-2022-005', 'FT-2022-008'
-)
+SET notification_email = 'fotoagent@fotopiatech.com'
+WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'fotopia');
+
+-- Per-employee overrides (applied AFTER the blanket update above).
+-- FT-2022-010: developer account — notifications route to the real inbox for live testing.
+UPDATE employees
+SET notification_email = 'i-youssef.abdelmoneim@fotopiatech.com'
+WHERE employee_code = 'FT-2022-010'
+  AND tenant_id = (SELECT id FROM tenants WHERE slug = 'fotopia');
+
+-- FT-2022-011: intern partner account — same flow as FT-2022-010.
+UPDATE employees
+SET notification_email = 'i-saif.ahmed@fotopiatech.com'
+WHERE employee_code = 'FT-2022-011'
   AND tenant_id = (SELECT id FROM tenants WHERE slug = 'fotopia');

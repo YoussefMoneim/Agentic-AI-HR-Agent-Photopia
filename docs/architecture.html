@@ -1,610 +1,1145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fotopia HR Agent — Architecture</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fotopia HR Agent — System Architecture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <style>
+    :root {
+      --bg-base:    #0d1117;
+      --bg-card:    #161b22;
+      --bg-card2:   #1c2231;
+      --border:     #30363d;
+      --border-hi:  #4a5568;
+      --accent:     #2563eb;
+      --accent-hi:  #3b82f6;
+      --accent-glow:#1d4ed8;
+      --green:      #22c55e;
+      --yellow:     #eab308;
+      --red:        #ef4444;
+      --purple:     #a855f7;
+      --cyan:       #06b6d4;
+      --orange:     #f97316;
+      --text-1:     #f0f6fc;
+      --text-2:     #8b949e;
+      --text-3:     #6e7681;
+      --tag-bg:     #1f2937;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      background: #0f1117;
-      color: #e8e8f0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-base);
+      color: var(--text-1);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Header ──────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 2.5rem 2rem 2rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    header::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 60% 80% at 50% -20%, rgba(37,99,235,0.18) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .header-badge {
+      display: inline-block;
+      background: rgba(37,99,235,0.15);
+      border: 1px solid rgba(59,130,246,0.35);
+      color: var(--accent-hi);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 0.25rem 0.85rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+    }
+    header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #f0f6fc 0%, #93c5fd 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header p {
+      color: var(--text-2);
+      font-size: 0.95rem;
+      margin-top: 0.5rem;
+    }
+    .header-meta {
       display: flex;
-      min-height: 100vh;
+      justify-content: center;
+      gap: 2rem;
+      margin-top: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .header-meta span {
+      font-size: 0.78rem;
+      color: var(--text-3);
+    }
+    .header-meta strong { color: var(--text-2); font-weight: 500; }
+
+    /* ── Tabs ────────────────────────────────────────────────── */
+    .tabs-bar {
+      display: flex;
+      gap: 0;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      padding: 0 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .tabs-bar::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      padding: 0.85rem 1.25rem;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-2);
+      cursor: pointer;
+      border: none;
+      background: none;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .tab-btn .icon { font-size: 1rem; opacity: 0.7; }
+    .tab-btn:hover { color: var(--text-1); }
+    .tab-btn.active {
+      color: var(--accent-hi);
+      border-bottom-color: var(--accent-hi);
     }
 
-    /* ── Sidebar ── */
-    nav {
-      width: 220px;
-      min-height: 100vh;
-      background: #0a0d14;
-      border-right: 1px solid #1a1d2e;
-      padding: 24px 0;
-      position: fixed;
-      top: 0; left: 0;
-      overflow-y: auto;
+    /* ── Content ─────────────────────────────────────────────── */
+    .content { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ── Section header ──────────────────────────────────────── */
+    .section-header { margin-bottom: 1.75rem; }
+    .section-header h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
     }
-    .nav-logo { padding: 0 20px 24px; border-bottom: 1px solid #1a1d2e; margin-bottom: 16px; }
-    .nav-logo h1 { font-size: 16px; font-weight: 700; color: #a5b4fc; }
-    .nav-logo p { font-size: 11px; color: #555; margin-top: 2px; }
-    nav a {
-      display: block; padding: 8px 20px;
-      color: #777; text-decoration: none;
-      font-size: 12px; transition: color .15s, background .15s;
-    }
-    nav a:hover, nav a.active { color: #a5b4fc; background: #1a1d2e; }
-    .nav-section {
-      font-size: 10px; text-transform: uppercase;
-      letter-spacing: .08em; color: #444;
-      padding: 12px 20px 4px; font-weight: 600;
+    .section-header p {
+      color: var(--text-2);
+      font-size: 0.88rem;
+      margin-top: 0.35rem;
     }
 
-    /* ── Main ── */
-    main { margin-left: 220px; flex: 1; padding: 40px 48px; max-width: 1100px; }
-
-    .page-header {
-      margin-bottom: 48px; padding-bottom: 24px;
-      border-bottom: 1px solid #1a1d2e;
+    /* ── Cards ───────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
     }
-    .page-header h1 { font-size: 24px; font-weight: 700; }
-    .page-header p { color: #666; font-size: 14px; margin-top: 6px; }
-    .badge {
-      display: inline-block; padding: 2px 10px;
-      background: #1a1d2e; border: 1px solid #2d3561;
-      border-radius: 12px; font-size: 11px; color: #a5b4fc;
-      margin-left: 8px; vertical-align: middle;
+    .card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
-
-    section { margin-bottom: 64px; scroll-margin-top: 24px; }
-    section h2 {
-      font-size: 18px; font-weight: 600; color: #e8e8f0;
-      margin-bottom: 6px; display: flex; align-items: center; gap: 10px;
-    }
-    .sn {
-      display: inline-flex; width: 26px; height: 26px;
-      background: #2d3561; color: #a5b4fc;
-      border-radius: 6px; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 700; flex-shrink: 0;
-    }
-    section p.desc {
-      color: #888; font-size: 13px; line-height: 1.6;
-      margin-bottom: 20px; max-width: 700px;
+    .card h3 .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
     }
 
-    .box {
-      background: #0d1018; border: 1px solid #1a1d2e;
-      border-radius: 12px; padding: 32px; overflow-x: auto;
-    }
-    .mermaid { display: flex; justify-content: center; }
+    /* ── Grid layouts ────────────────────────────────────────── */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
+    @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
 
-    /* ── Tool table ── */
-    .tt { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .tt th {
-      padding: 8px 14px; background: #1a1d2e; color: #a5b4fc;
-      font-weight: 600; text-align: left; border-bottom: 1px solid #2d3561;
+    /* ── Tags / badges ───────────────────────────────────────── */
+    .tag {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      margin: 0.15rem;
     }
-    .tt td { padding: 7px 14px; border-bottom: 1px solid #1a1d2e; color: #c8c8d8; vertical-align: top; }
-    .tt tr:hover td { background: #111420; }
-    .tn { font-family: monospace; color: #a5b4fc; font-size: 12px; }
-    .rb {
-      display: inline-block; padding: 1px 7px;
-      border-radius: 10px; font-size: 10px; font-weight: 500; margin: 1px 2px;
-    }
-    .r-emp  { background: #1e3a2f; color: #4ade80; border: 1px solid #166534; }
-    .r-hrs  { background: #1e2a5e; color: #93c5fd; border: 1px solid #1e40af; }
-    .r-hrm  { background: #3b1e5e; color: #c4b5fd; border: 1px solid #6d28d9; }
-    .r-adm  { background: #5e1e1e; color: #fca5a5; border: 1px solid #991b1b; }
-    .cat td { background: #111420; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 10px 14px 4px; font-weight: 600; }
+    .tag.blue   { background: rgba(37,99,235,0.12);  border-color: rgba(59,130,246,0.3);  color: #93c5fd; }
+    .tag.green  { background: rgba(34,197,94,0.10);  border-color: rgba(34,197,94,0.3);   color: #86efac; }
+    .tag.yellow { background: rgba(234,179,8,0.10);  border-color: rgba(234,179,8,0.3);   color: #fde047; }
+    .tag.purple { background: rgba(168,85,247,0.10); border-color: rgba(168,85,247,0.3);  color: #d8b4fe; }
+    .tag.cyan   { background: rgba(6,182,212,0.10);  border-color: rgba(6,182,212,0.3);   color: #67e8f9; }
+    .tag.orange { background: rgba(249,115,22,0.10); border-color: rgba(249,115,22,0.3);  color: #fdba74; }
+    .tag.red    { background: rgba(239,68,68,0.10);  border-color: rgba(239,68,68,0.3);   color: #fca5a5; }
 
-    /* ── Phase cards ── */
-    .phases { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
-    .pc {
-      flex: 1; min-width: 200px; background: #0d1018;
-      border: 1px solid #1a1d2e; border-radius: 8px; padding: 14px 16px;
+    /* ── Mermaid wrapper ─────────────────────────────────────── */
+    .mermaid-wrap {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2rem 1.5rem;
+      overflow-x: auto;
+      margin-bottom: 1.25rem;
     }
-    .pc h4 { font-size: 12px; color: #a5b4fc; font-weight: 600; margin-bottom: 6px; }
-    .pc ul { list-style: none; font-size: 12px; color: #888; }
-    .pc ul li::before { content: '→ '; color: #2d3561; }
-    .pc ul li { margin: 3px 0; }
+    .mermaid-wrap .mermaid { min-width: 600px; }
+
+    /* ── Tables ──────────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th {
+      text-align: left;
+      padding: 0.65rem 1rem;
+      background: var(--bg-card2);
+      color: var(--text-2);
+      font-weight: 600;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.7rem 1rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    td code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      color: #93c5fd;
+    }
+
+    /* ── Status pills ────────────────────────────────────────── */
+    .pill {
+      display: inline-block;
+      padding: 0.2rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .pill.live    { background: rgba(34,197,94,0.15);  color: #86efac; border: 1px solid rgba(34,197,94,0.25); }
+    .pill.ready   { background: rgba(234,179,8,0.15);  color: #fde047; border: 1px solid rgba(234,179,8,0.25); }
+    .pill.planned { background: rgba(107,114,128,0.2); color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
+
+    /* ── Security columns ────────────────────────────────────── */
+    .security-item {
+      display: flex;
+      gap: 0.75rem;
+      padding: 0.7rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .security-item:last-child { border-bottom: none; }
+    .security-item .icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.1rem; }
+    .security-item h4 { font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem; }
+    .security-item p  { font-size: 0.8rem; color: var(--text-2); }
+
+    /* ── Layer stack ─────────────────────────────────────────── */
+    .layer-stack { display: flex; flex-direction: column; gap: 0.5rem; }
+    .layer {
+      border-radius: 8px;
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      border: 1px solid var(--border);
+    }
+    .layer-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      font-weight: 600;
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .layer-body { flex: 1; }
+    .layer-body strong { font-size: 0.88rem; font-weight: 600; }
+    .layer-body p { font-size: 0.78rem; color: var(--text-2); margin-top: 0.1rem; }
+    .layer-status { margin-left: auto; }
+
+    /* ── Version list ────────────────────────────────────────── */
+    .version-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.83rem;
+    }
+    .version-row:last-child { border-bottom: none; }
+    .version-row .lib  { color: var(--text-1); font-weight: 500; }
+    .version-row .ver  { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #86efac; }
+    .version-row .role { font-size: 0.75rem; color: var(--text-3); max-width: 200px; text-align: right; }
+
+    /* ── Hardware ────────────────────────────────────────────── */
+    .hw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    @media (max-width: 700px) { .hw-grid { grid-template-columns: 1fr; } }
+    .hw-card {
+      background: var(--bg-card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+    .hw-card h4 {
+      color: var(--text-2);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-size: 0.73rem;
+      font-weight: 600;
+      margin-bottom: 0.85rem;
+    }
+    .hw-row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+      padding: 0.4rem 0;
+      font-size: 0.83rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .hw-row:last-child { border-bottom: none; }
+    .hw-row .hw-label { color: var(--text-2); width: 110px; flex-shrink: 0; font-size: 0.78rem; }
+    .hw-row .hw-val   { color: var(--text-1); font-weight: 500; }
+
+    /* ── Footnote ────────────────────────────────────────────── */
+    .footnote {
+      font-size: 0.75rem;
+      color: var(--text-3);
+      margin-top: 0.6rem;
+      padding-left: 0.75rem;
+      border-left: 2px solid var(--border);
+    }
+
+    /* ── Cred status ─────────────────────────────────────────── */
+    .cred-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: inline-block;
+      margin-right: 0.3rem;
+    }
+    .cred-dot.live    { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .cred-dot.ready   { background: var(--yellow); }
+    .cred-dot.planned { background: var(--text-3); }
+
+    /* ── Print ───────────────────────────────────────────────── */
+    @media print {
+      .tabs-bar { position: static; }
+      .tab-pane { display: block !important; page-break-before: always; }
+      .tab-pane:first-of-type { page-break-before: avoid; }
+    }
   </style>
 </head>
 <body>
 
-<nav>
-  <div class="nav-logo">
-    <h1>Fotopia HR Agent</h1>
-    <p>Architecture Reference</p>
+<!-- ══════════════════════════════════════════ HEADER ══════════════════════════════════════════ -->
+<header>
+  <div class="header-badge">Confidential — Internal Technical Reference</div>
+  <h1>Fotopia HR Agent</h1>
+  <p>Enterprise Architecture &amp; Technical Reference — June 2026</p>
+  <div class="header-meta">
+    <span><strong>Project Lead:</strong> Youssef Abdelmoneim</span>
+    <span><strong>Stakeholder:</strong> Dr. Ahmed El-Yazbi, R&amp;D AI Director</span>
+    <span><strong>Status:</strong> Phase 1 Complete · Phase 1.5 In Progress</span>
+    <span><strong>Pilot Client:</strong> Fotopia Technologies, Cairo</span>
   </div>
-  <div class="nav-section">Overview</div>
-  <a href="#sys">1. System Architecture</a>
-  <a href="#flow">2. Request Flow</a>
-  <a href="#react">3. ReAct Agent Loop</a>
-  <div class="nav-section">Capabilities</div>
-  <a href="#tools">4. Tool Catalog</a>
-  <div class="nav-section">Data</div>
-  <a href="#db">5. Database Schema</a>
-  <a href="#mt">6. Multi-Tenant Isolation</a>
-  <div class="nav-section">Security</div>
-  <a href="#sec">7. Security Layers</a>
-  <div class="nav-section">Frontend</div>
-  <a href="#fe">8. Frontend Components</a>
+</header>
+
+<!-- ══════════════════════════════════════════ TABS ═══════════════════════════════════════════ -->
+<nav class="tabs-bar" role="tablist">
+  <button class="tab-btn active" onclick="switchTab('dataflow',this)"><span class="icon">&#8635;</span> Vacation Request Flow</button>
+  <button class="tab-btn" onclick="switchTab('architecture',this)"><span class="icon">&#11041;</span> System Architecture</button>
+  <button class="tab-btn" onclick="switchTab('techstack',this)"><span class="icon">&#9881;</span> Tech Stack</button>
+  <button class="tab-btn" onclick="switchTab('security',this)"><span class="icon">&#9873;</span> Security</button>
+  <button class="tab-btn" onclick="switchTab('hardware',this)"><span class="icon">&#9635;</span> Hardware</button>
+  <button class="tab-btn" onclick="switchTab('tools',this)"><span class="icon">&#10799;</span> Tools &amp; Access</button>
 </nav>
 
-<main>
-  <div class="page-header">
-    <h1>Fotopia HR Agent <span class="badge">Phase 1 Demo</span></h1>
-    <p>Complete architecture reference — system components, data flows, security model, and design decisions.</p>
+<div class="content">
+
+<!-- ═══════════════════════════════════════ TAB 1: DATAFLOW ═══════════════════════════════════ -->
+<div id="tab-dataflow" class="tab-pane active">
+  <div class="section-header">
+    <h2>Vacation Request — End-to-End Dataflow</h2>
+    <p>Complete sequence from employee chat message through approval, notification, and ERP sync. Every step writes to the audit log.</p>
   </div>
 
-  <!-- ─────────────────── 1. System Architecture ─────────────────── -->
-  <section id="sys">
-    <h2><span class="sn">1</span> System Architecture Overview</h2>
-    <p class="desc">Standard three-tier web application. The browser talks to a Python API; the API calls an LLM to interpret requests and decide what tools to run; all persistent data lives in PostgreSQL. The LLM provider is swappable — Claude (Anthropic) or Grok (xAI) — configured by a single environment variable.</p>
-    <div class="box">
-      <div class="mermaid">
-flowchart LR
-    subgraph FE["Frontend  (React + Vite  :5173)"]
-        B["Browser"]
-    end
-
-    subgraph BE["Backend  (FastAPI + Python  :8000)"]
-        API["FastAPI\nAPI Layer"]
-        ORCH["Orchestrator\nReAct Loop"]
-        REG["Tool Registry\n10 tools"]
-        SES["Session Store\nin-memory dict"]
-    end
-
-    subgraph ST["Storage"]
-        DB[("PostgreSQL\n:5432")]
-        PDF["PDF Files\nbackend/documents/"]
-    end
-
-    subgraph EXT["External LLM APIs"]
-        CL["Claude\nAnthropic API"]
-        GR["Grok\nxAI API"]
-    end
-
-    B -->|"POST /chat"| API
-    B -->|"GET /documents/id"| API
-    API <--> SES
-    API --> ORCH
-    ORCH -->|"LLM_PROVIDER=claude"| CL
-    ORCH -. "LLM_PROVIDER=grok" .-> GR
-    ORCH --> REG
-    REG --> DB
-    REG --> PDF
-      </div>
-    </div>
-  </section>
-
-  <!-- ─────────────────── 2. Request Flow ─────────────────── -->
-  <section id="flow">
-    <h2><span class="sn">2</span> End-to-End Request Flow</h2>
-    <p class="desc">The exact path of every chat message. The orchestrator may loop through the LLM and tools multiple times — the LLM calls a tool, sees the result, calls another, and so on — until it has enough information to produce a final text answer.</p>
-    <div class="box">
-      <div class="mermaid">
+  <div class="mermaid-wrap">
+    <div class="mermaid">
 sequenceDiagram
-    actor User
-    participant Br as Browser
-    participant Fa as FastAPI
-    participant Or as Orchestrator
-    participant Lm as LLM
-    participant Re as Registry
-    participant Db as PostgreSQL
+    autonumber
+    participant E   as Employee<br/>(Chat UI)
+    participant API as FastAPI<br/>Python 3.11
+    participant LLM as Claude Sonnet 4-5<br/>Anthropic SDK
+    participant TR  as ToolRegistry<br/>(Security Gateway)
+    participant T   as submit_leave_request<br/>(Tool)
+    participant DB  as PostgreSQL 15<br/>(leave_requests)
+    participant SMTP as Office 365 SMTP<br/>port 587 STARTTLS
+    participant MGR as Manager<br/>Inbox
+    participant IMAP as Gmail IMAP Listener<br/>port 993 SSL
+    participant OD  as Odoo ERP<br/>XML-RPC v2
 
-    User->>Br: Types message
-    Br->>Fa: POST /chat with message and session_id
-    Fa->>Fa: Load prior_messages from _sessions
-    Fa->>Or: run(message, ctx, llm, registry)
+    E->>API: POST /chat {message, session_id}<br/>"Submit 5 days annual leave July 10"
+    Note over API: build_context() → ToolContext<br/>{tenant_id, role, employee_code}
+    API->>LLM: messages + tool_schemas<br/>(filtered by role — policy before prompt)
+    LLM-->>API: tool_use → submit_leave_request<br/>{employee_code, leave_type, start, end}
+    API->>TR: execute("submit_leave_request", args, ctx)
+    Note over TR: Re-check role permission<br/>Re-check row-level access
+    TR->>T: run(args, data_source, ctx)
+    T->>DB: INSERT leave_requests (status=pending)<br/>INSERT pending_actions (token)
+    DB-->>T: leave_id, approval_token
+    T->>SMTP: send_email(manager, approval_link)<br/>Reply-To: hr.agent.fotopia@gmail.com
+    SMTP-->>MGR: Approval Request Email
+    TR->>DB: INSERT audit_log (tool, actor, outcome, latency_ms)
+    API-->>E: "Request submitted — awaiting manager approval"
 
-    loop ReAct Loop — up to 10 iterations
-        Or->>Lm: generate(messages, tool_specs, system_prompt)
-        alt stop_reason is end_turn
-            Lm-->>Or: Final text response
-            Or-->>Fa: AgentResponse(text, documents, messages)
-        else stop_reason is tool_use
-            Lm-->>Or: List of tool_calls
-            Or->>Re: execute(tool_name, input, ctx)
-            Re->>Re: Role authorization check
-            Re->>Db: SQL query WHERE tenant_id = x
-            Db-->>Re: Result rows
-            Re->>Db: INSERT audit_log
-            Re-->>Or: ToolResult(success, data)
-            Or->>Or: Append tool_result to messages
-        end
+    alt Manager replies by email (bidirectional)
+        MGR->>IMAP: Reply APPROVE or REJECT
+        IMAP->>API: POST /api/leave/resolve (token + decision)
+    else Manager clicks approval link
+        MGR->>API: GET /approve/{token}?action=approve
+    else Manager uses UI Approval Inbox
+        MGR->>API: POST /api/leave/{id}/approve
     end
 
-    Fa->>Fa: Save messages to _sessions
-    Fa-->>Br: response, documents, session_id
-    Br-->>User: Rendered markdown and PDF cards
+    API->>DB: UPDATE leave_requests status=approved<br/>UPDATE leave_balances used_days
+    API->>SMTP: send_email(employee, confirmation)
+    API->>OD: XML-RPC hr.leave.create + action_validate
+    OD-->>API: odoo_leave_id
+    API->>DB: INSERT audit_log (approval event)
+    SMTP-->>E: Confirmation Email
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:#22c55e"></span>Key Design Principles</h3>
+    <div class="grid-2">
+      <div class="security-item">
+        <span class="icon">&#128274;</span>
+        <div>
+          <h4>Policy Before Prompt</h4>
+          <p>ToolRegistry filters available tools by role <em>before</em> Claude sees them. An employee cannot invoke payroll tools because they are never offered to the LLM.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128203;</span>
+        <div>
+          <h4>Immutable Audit Trail</h4>
+          <p>Every tool execution — success, failure, or denial — writes to <code>audit_log</code>. No tool can bypass this; the ToolRegistry is the only allowed call path.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#129518;</span>
+        <div>
+          <h4>LLM Never Does Math</h4>
+          <p>Leave duration is calculated in deterministic Python (weekday counter). The LLM extracts intent; business logic is code, not inference.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128260;</span>
+        <div>
+          <h4>Triple Approval Channel</h4>
+          <p>Manager approves via email reply, link click, or UI inbox. All three paths converge to the same <code>/api/leave/resolve</code> handler with identical authorization logic.</p>
+        </div>
       </div>
     </div>
-  </section>
+  </div>
+</div>
 
-  <!-- ─────────────────── 3. ReAct Loop ─────────────────── -->
-  <section id="react">
-    <h2><span class="sn">3</span> ReAct Agent Loop</h2>
-    <p class="desc">ReAct = Reason + Act. The LLM is stateless — it has no memory and cannot run tools itself. The orchestrator gives it memory (by managing the messages list) and agency (by executing the tools it requests). The hard cap of 10 iterations prevents runaway API costs.</p>
-    <div class="box">
-      <div class="mermaid">
-flowchart TD
-    A(["START"]) --> B["Build system prompt\nwith user identity and role"]
-    B --> C["Filter tool specs by role\nget_specs_for_role"]
-    C --> D["messages = prior_messages\n+ new user message"]
-    D --> CHK{"Iteration\ncount lt 10?"}
-    CHK -->|"No"| FAIL(["Return error:\nunable to complete"])
-    CHK -->|"Yes"| G["LLM.generate\nmessages + tools + system"]
-    G --> SR{"stop_reason?"}
-    SR -->|"end_turn"| OK(["Return AgentResponse\ntext + documents"])
-    SR -->|"other"| OK2(["Return AgentResponse\ntext or Done"])
-    SR -->|"tool_use"| H["Append raw_blocks\nto messages"]
-    H --> I["For each tool_call:\nregistry.execute"]
-    I --> J["Append tool_results\nto messages"]
-    J --> CHK
+<!-- ════════════════════════════════════ TAB 2: ARCHITECTURE ══════════════════════════════════ -->
+<div id="tab-architecture" class="tab-pane">
+  <div class="section-header">
+    <h2>System Architecture — 9 Layers</h2>
+    <p>Designed so new capabilities are added, never rewritten. Layers 1–6 and 9 are operational today.</p>
+  </div>
 
-    style A   fill:#2d3561,stroke:#4f5fa8,color:#e8e8f0
-    style OK  fill:#1e3a2f,stroke:#166534,color:#4ade80
-    style OK2 fill:#1e3a2f,stroke:#166534,color:#4ade80
-    style FAIL fill:#5e1e1e,stroke:#991b1b,color:#fca5a5
+  <div class="layer-stack">
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(37,99,235,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(37,99,235,0.2);color:#93c5fd">1</div>
+      <div class="layer-body">
+        <strong>Presentation</strong>
+        <p>React 18.3 + Vite 5.4 — Chat interface, document preview, leave submission, manager approval inbox</p>
+        <div style="margin-top:0.4rem"><span class="tag blue">React 18.3.1</span><span class="tag blue">Vite 5.4.0</span><span class="tag blue">JavaScript / JSX</span><span class="tag blue">react-markdown 10.1</span></div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live</span></div>
+    </div>
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(168,85,247,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(168,85,247,0.2);color:#d8b4fe">2</div>
+      <div class="layer-body">
+        <strong>API / Identity</strong>
+        <p>FastAPI 0.115. <code>build_context()</code> returns ToolContext <code>{tenant_id, user_id, role, employee_code}</code>. Stubbed today — Phase 2 replaces this one function with JWT validation. Nothing else changes.</p>
+        <div style="margin-top:0.4rem"><span class="tag purple">FastAPI 0.115.0</span><span class="tag purple">Uvicorn 0.30.6</span><span class="tag purple">Pydantic 2.8.2</span><span class="tag yellow">JWT auth → Phase 2</span></div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live (stubbed)</span></div>
+    </div>
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(6,182,212,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(6,182,212,0.2);color:#67e8f9">3</div>
+      <div class="layer-body">
+        <strong>Orchestrator</strong>
+        <p>Raw Anthropic SDK <code>tool_use</code> loop, MAX_ITERS=10. Conversation history per session in-memory. Phase 2 moves to Redis. Future: LangGraph state machine runs alongside (not instead) for multi-day workflows — both use the same ToolRegistry.</p>
+        <div style="margin-top:0.4rem"><span class="tag cyan">anthropic SDK ≥0.40.0</span><span class="tag cyan">claude-sonnet-4-5</span><span class="tag cyan">MAX_ITERS=10</span><span class="tag yellow">Redis → Phase 2</span><span class="tag yellow">LangGraph → Phase 3</span></div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live</span></div>
+    </div>
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(239,68,68,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(239,68,68,0.2);color:#fca5a5">4</div>
+      <div class="layer-body">
+        <strong>Tool Gateway — Security Boundary</strong>
+        <p><code>schemas_for(ctx)</code> filters tool list by role BEFORE the LLM call. <code>execute(name, args, ctx)</code> re-checks role, runs the tool, writes <code>audit_log</code>. The only legal call path — tools cannot be called directly.</p>
+        <div style="margin-top:0.4rem"><span class="tag red">Policy-before-prompt</span><span class="tag red">Double role check</span><span class="tag red">100% audit coverage</span></div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live</span></div>
+    </div>
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(34,197,94,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(34,197,94,0.2);color:#86efac">5</div>
+      <div class="layer-body">
+        <strong>Tools (12 live)</strong>
+        <p>Each defines <code>allowed_roles</code>, receives <code>ToolContext</code>, enforces row-level access, returns <code>ToolResult</code>. LLM never invents content or does math.</p>
+        <div style="margin-top:0.4rem">
+          <span class="tag green">get_employee_data</span><span class="tag green">search_employees</span><span class="tag green">list_employees</span><span class="tag green">get_leave_balance</span><span class="tag green">get_employee_summary</span><span class="tag green">get_employee_documents</span><span class="tag green">generate_salary_certificate</span><span class="tag green">generate_twimc_letter</span><span class="tag green">generate_experience_certificate</span><span class="tag green">calculate_end_of_service</span><span class="tag green">submit_leave_request</span><span class="tag green">approve_leave_request</span>
+        </div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live</span></div>
+    </div>
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(234,179,8,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(234,179,8,0.2);color:#fde047">6</div>
+      <div class="layer-body">
+        <strong>Data Layer — PostgreSQL 15</strong>
+        <p><code>tenant_id</code> on every table and every query. <code>DataSource</code> abstraction isolates tools from the DB driver. Phase 2 adds RLS FORCE + field-level encryption for <code>national_id</code> and <code>salary</code>.</p>
+        <div style="margin-top:0.4rem"><span class="tag yellow">PostgreSQL 15.18</span><span class="tag yellow">pgvector extension</span><span class="tag yellow">psycopg2-binary 2.9.9</span><span class="tag orange">RLS FORCE → Phase 2</span></div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live</span></div>
+    </div>
+
+    <div class="layer" style="opacity:0.55">
+      <div class="layer-num" style="background:rgba(107,114,128,0.2);color:#9ca3af">7</div>
+      <div class="layer-body">
+        <strong>Knowledge / RAG Layer</strong>
+        <p>pgvector. Every chunk carries <code>tenant_id + allowed_roles + owner_employee_id</code>. Metadata pre-filter runs BEFORE semantic search — never after. Unclassified chunks default to most-restrictive label (fail-closed).</p>
+        <div style="margin-top:0.4rem"><span class="tag">pgvector</span><span class="tag">Pre-filter retrieval</span><span class="tag">Fail-closed labeling</span></div>
+      </div>
+      <div class="layer-status"><span class="pill planned">Phase 3</span></div>
+    </div>
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(249,115,22,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(249,115,22,0.2);color:#fdba74">8</div>
+      <div class="layer-body">
+        <strong>LLM Layer</strong>
+        <p><code>llm/claude.py</code> is the only file importing the Anthropic SDK. Stateless per request. Grok/XAI is a drop-in via one env var. Self-hosted Llama/Qwen supported for on-prem clients — zero tool changes required.</p>
+        <div style="margin-top:0.4rem"><span class="tag orange">claude-sonnet-4-5/4-6</span><span class="tag orange">Grok/XAI swap via env var</span><span class="tag orange">Stateless — no data retained</span></div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live</span></div>
+    </div>
+
+    <div class="layer" style="background:linear-gradient(90deg,rgba(168,85,247,0.08) 0%,transparent 100%)">
+      <div class="layer-num" style="background:rgba(168,85,247,0.2);color:#d8b4fe">9</div>
+      <div class="layer-body">
+        <strong>Audit Layer</strong>
+        <p><code>audit_log</code> records every tool call: tool name, actor role, outcome, result summary, latency_ms, timestamp. Written by the ToolRegistry — cannot be bypassed. Phase 3 adds hash-chain tamper-evidence and WORM-mirror storage.</p>
+        <div style="margin-top:0.4rem"><span class="tag purple">100% coverage</span><span class="tag purple">latency_ms tracking</span><span class="tag yellow">Hash-chain + WORM → Phase 3</span></div>
+      </div>
+      <div class="layer-status"><span class="pill live">Live</span></div>
+    </div>
+
+  </div>
+
+  <div class="card" style="margin-top:1.75rem">
+    <h3><span class="dot" style="background:#a855f7"></span>Multi-Tenancy Model</h3>
+    <div class="grid-2">
+      <div>
+        <p style="font-size:0.85rem;color:var(--text-2)">Every table carries <code>tenant_id</code>. The architecture supports shared-schema today and database-per-tenant (Phase 4) for premium banking/government clients — the DataSource abstraction makes this a configuration change, not a rewrite.</p>
+      </div>
+      <div>
+        <div class="version-row"><span class="lib">Shared schema (current)</span><span class="ver">tenant_id column</span></div>
+        <div class="version-row"><span class="lib">Row-Level Security</span><span class="ver">Phase 2 — FORCE</span></div>
+        <div class="version-row"><span class="lib">DB-per-tenant (premium)</span><span class="ver">Phase 4</span></div>
+        <div class="version-row"><span class="lib">Field encryption (salary, NID)</span><span class="ver">Phase 3</span></div>
       </div>
     </div>
-  </section>
+  </div>
+</div>
 
-  <!-- ─────────────────── 4. Tool Catalog ─────────────────── -->
-  <section id="tools">
-    <h2><span class="sn">4</span> Tool Catalog &amp; Role Access</h2>
-    <p class="desc">The agent has 10 tools across two categories. Role-based access operates at two independent layers: the LLM only receives specs for tools its role permits (it cannot even attempt others), and the registry performs a second check before any tool actually runs.</p>
-    <div class="box">
-      <table class="tt">
+<!-- ══════════════════════════════════════ TAB 3: TECH STACK ══════════════════════════════════ -->
+<div id="tab-techstack" class="tab-pane">
+  <div class="section-header">
+    <h2>Technology Stack</h2>
+    <p>All versions pinned from <code>requirements.txt</code> and <code>package.json</code> as of June 2026.</p>
+  </div>
+
+  <div class="grid-2">
+
+    <div class="card">
+      <h3><span class="dot" style="background:#3b82f6"></span>Frontend</h3>
+      <div class="version-row"><span class="lib">React</span><span class="ver">18.3.1</span><span class="role">UI framework</span></div>
+      <div class="version-row"><span class="lib">React DOM</span><span class="ver">18.3.1</span><span class="role">Browser renderer</span></div>
+      <div class="version-row"><span class="lib">Vite</span><span class="ver">5.4.0</span><span class="role">Build tool / dev server</span></div>
+      <div class="version-row"><span class="lib">react-markdown</span><span class="ver">10.1.0</span><span class="role">Chat message rendering</span></div>
+      <div class="version-row"><span class="lib">Language</span><span class="ver">JavaScript (JSX)</span><span class="role">Not TypeScript</span></div>
+      <p class="footnote" style="margin-top:0.75rem">Single-page app. Communicates with backend via <code>fetch()</code> — no HTTP client library dependency.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="dot" style="background:#22c55e"></span>Backend</h3>
+      <div class="version-row"><span class="lib">Python</span><span class="ver">3.11.15</span><span class="role">Runtime</span></div>
+      <div class="version-row"><span class="lib">FastAPI</span><span class="ver">0.115.0</span><span class="role">Web framework (async)</span></div>
+      <div class="version-row"><span class="lib">Uvicorn</span><span class="ver">0.30.6</span><span class="role">ASGI server</span></div>
+      <div class="version-row"><span class="lib">Pydantic</span><span class="ver">2.8.2</span><span class="role">Schema validation</span></div>
+      <div class="version-row"><span class="lib">python-dotenv</span><span class="ver">1.0.1</span><span class="role">Env variable loading</span></div>
+      <div class="version-row"><span class="lib">PyJWT</span><span class="ver">≥ 2.8.0</span><span class="role">JWT auth (Phase 2)</span></div>
+      <div class="version-row"><span class="lib">bcrypt</span><span class="ver">≥ 4.0.0</span><span class="role">Password hashing</span></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="dot" style="background:#a855f7"></span>AI / LLM</h3>
+      <div class="version-row"><span class="lib">anthropic SDK</span><span class="ver">≥ 0.40.0</span><span class="role">Primary LLM client</span></div>
+      <div class="version-row"><span class="lib">Model (default)</span><span class="ver">claude-sonnet-4-5</span><span class="role">Anthropic Claude</span></div>
+      <div class="version-row"><span class="lib">Model (current env)</span><span class="ver">claude-sonnet-4-6</span><span class="role">Latest Sonnet</span></div>
+      <div class="version-row"><span class="lib">Loop pattern</span><span class="ver">tool_use — raw SDK</span><span class="role">No LangChain</span></div>
+      <div class="version-row"><span class="lib">Max iterations</span><span class="ver">10 per request</span><span class="role">Runaway guard</span></div>
+      <div class="version-row"><span class="lib">Alt provider</span><span class="ver">Grok / XAI API</span><span class="role">Swappable via LLM_PROVIDER</span></div>
+      <p class="footnote" style="margin-top:0.75rem">Anthropic SDK is imported in exactly one file — <code>llm/claude.py</code>. Swap providers with one environment variable; no tool or registry code changes.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="dot" style="background:#f97316"></span>Database</h3>
+      <div class="version-row"><span class="lib">PostgreSQL</span><span class="ver">15.18</span><span class="role">Primary database</span></div>
+      <div class="version-row"><span class="lib">Docker image</span><span class="ver">pgvector/pgvector:pg15</span><span class="role">Includes pgvector ext</span></div>
+      <div class="version-row"><span class="lib">psycopg2-binary</span><span class="ver">2.9.9</span><span class="role">Python DB driver</span></div>
+      <div class="version-row"><span class="lib">pgvector extension</span><span class="ver">bundled with image</span><span class="role">RAG — Phase 3</span></div>
+      <div class="version-row"><span class="lib">Row-Level Security</span><span class="ver">Phase 2 — FORCE</span><span class="role">Tenant isolation</span></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="dot" style="background:#eab308"></span>Document Generation</h3>
+      <div class="version-row"><span class="lib">fpdf2</span><span class="ver">2.7.9</span><span class="role">PDF generation</span></div>
+      <div class="version-row"><span class="lib">jinja2</span><span class="ver">3.1.4</span><span class="role">Template engine</span></div>
+      <div class="version-row"><span class="lib">Output format</span><span class="ver">PDF (bilingual)</span><span class="role">Arabic + English</span></div>
+      <div class="version-row"><span class="lib">Document types</span><span class="ver">SC- / TW- / EC-</span><span class="role">Salary / TWIMC / Exp cert</span></div>
+      <p class="footnote" style="margin-top:0.75rem">Hardcoded fpdf layouts with DB-driven slot-filling. LLM never invents document content. Reference codes are deterministic and stored in <code>audit_log</code>.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="dot" style="background:#06b6d4"></span>Email &amp; Integration</h3>
+      <div class="version-row"><span class="lib">SMTP sender</span><span class="ver">Office 365 · port 587</span><span class="role">Outbound notifications</span></div>
+      <div class="version-row"><span class="lib">IMAP listener</span><span class="ver">Gmail · port 993</span><span class="role">Approval replies</span></div>
+      <div class="version-row"><span class="lib">SMTP library</span><span class="ver">smtplib (stdlib)</span><span class="role">No extra dependency</span></div>
+      <div class="version-row"><span class="lib">IMAP library</span><span class="ver">imaplib (stdlib)</span><span class="role">No extra dependency</span></div>
+      <div class="version-row"><span class="lib">ACS (Azure Email)</span><span class="ver">azure-comm-email 1.0.0</span><span class="role">Ready — not activated</span></div>
+      <div class="version-row"><span class="lib">ERP Integration</span><span class="ver">Odoo XML-RPC v2</span><span class="role">Leave sync to Odoo</span></div>
+      <div class="version-row"><span class="lib">Odoo library</span><span class="ver">xmlrpc.client (stdlib)</span><span class="role">No extra dependency</span></div>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:#8b949e"></span>Infrastructure</h3>
+    <div class="grid-3">
+      <div>
+        <div class="version-row"><span class="lib">Containerization</span><span class="ver">Docker + Compose v2</span></div>
+        <div class="version-row"><span class="lib">Backend image</span><span class="ver">python:3.11-slim</span></div>
+        <div class="version-row"><span class="lib">DB image</span><span class="ver">pgvector/pgvector:pg15</span></div>
+      </div>
+      <div>
+        <div class="version-row"><span class="lib">Backend port</span><span class="ver">8000</span></div>
+        <div class="version-row"><span class="lib">Postgres port</span><span class="ver">5432 (internal)</span></div>
+        <div class="version-row"><span class="lib">Frontend dev</span><span class="ver">5173 (Vite HMR)</span></div>
+      </div>
+      <div>
+        <div class="version-row"><span class="lib">Schema init</span><span class="ver">schema.sql on startup</span></div>
+        <div class="version-row"><span class="lib">Config</span><span class="ver">ENV vars only</span></div>
+        <div class="version-row"><span class="lib">Target OS</span><span class="ver">Ubuntu 22.04 LTS</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════ TAB 4: SECURITY ══════════════════════════════════ -->
+<div id="tab-security" class="tab-pane">
+  <div class="section-header">
+    <h2>Security Architecture</h2>
+    <p>Defense-in-depth across three dimensions: data in transit, data at rest, and role-based access control.</p>
+  </div>
+
+  <div class="grid-2">
+
+    <div class="card">
+      <h3><span class="dot" style="background:#3b82f6"></span>Data in Transit</h3>
+      <div class="security-item">
+        <span class="icon">&#128274;</span>
+        <div>
+          <h4>TLS 1.2+ on all external calls</h4>
+          <p>Anthropic API (HTTPS 443), Odoo XML-RPC (HTTPS 443), Azure Communication Services (HTTPS 443). No plaintext external channels.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128231;</span>
+        <div>
+          <h4>SMTP STARTTLS — Office 365</h4>
+          <p>Outbound email uses STARTTLS upgrade on port 587. TLS is negotiated before any credentials are transmitted. Connection is IPv4-forced to prevent Docker IPv6 routing failures.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128236;</span>
+        <div>
+          <h4>IMAP over SSL — Gmail</h4>
+          <p>Inbound approval listener connects via SSL on port 993. An App Password (not the account password) is used — limits scope of credential to IMAP access only.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128051;</span>
+        <div>
+          <h4>Docker network isolation</h4>
+          <p>Backend and database communicate over an internal Docker bridge network. The database port (5432) is not exposed to the host in production — only the backend reaches it.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#127915;</span>
+        <div>
+          <h4>Signed one-time approval tokens</h4>
+          <p>Each approval link contains a token stored in <code>pending_actions</code>. Tokens are consumed on first use. Prevents replay attacks on the leave approval endpoint.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3><span class="dot" style="background:#22c55e"></span>Data at Rest</h3>
+      <div class="security-item">
+        <span class="icon">&#128208;</span>
+        <div>
+          <h4>PostgreSQL Row-Level Security</h4>
+          <p><code>tenant_id</code> on every table. Phase 2 enables <code>ALTER TABLE ... ENABLE ROW LEVEL SECURITY ... FORCE</code>. Queries from any role are automatically scoped to their tenant — cross-tenant data leaks become impossible at the database engine level.</p>
+          <p style="color:var(--yellow);font-size:0.75rem;margin-top:0.25rem">RLS FORCE targeted for Phase 2</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128273;</span>
+        <div>
+          <h4>Secrets via environment variables only</h4>
+          <p>All credentials (API keys, DB passwords, SMTP) are loaded from <code>.env</code> via <code>config.py</code>. No secret appears in source code or version control. <code>.env</code> is gitignored.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128272;</span>
+        <div>
+          <h4>Field-level encryption — Phase 3</h4>
+          <p><code>national_id</code> and <code>salary</code> columns encrypted at rest with a blind index pattern — encrypted storage, searchable via deterministic hash, plaintext never written to disk.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128220;</span>
+        <div>
+          <h4>Immutable audit log</h4>
+          <p>Every tool call logged by the ToolRegistry — cannot be bypassed. Phase 3 adds a hash-chain (each row hashes the previous row's digest) and WORM-mirrored storage for tamper evidence in regulated environments.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:#f97316"></span>Role-Based Access Control</h3>
+    <p style="font-size:0.83rem;color:var(--text-2);margin-bottom:1rem">Four roles. Access is enforced at two independent layers: ToolRegistry (application) and PostgreSQL RLS (database). Both must pass.</p>
+    <div style="overflow-x:auto">
+      <table>
         <thead>
           <tr>
-            <th>Tool Name</th>
-            <th>Description</th>
-            <th>Allowed Roles</th>
+            <th>Role</th>
+            <th>Read own record</th>
+            <th>Read all employees</th>
+            <th>Submit leave</th>
+            <th>Approve leave</th>
+            <th>Generate documents</th>
+            <th>EOS calculation</th>
+            <th>Admin tools</th>
           </tr>
         </thead>
         <tbody>
-          <tr class="cat"><td colspan="3">Employee Tools</td></tr>
           <tr>
-            <td class="tn">search_employees</td>
-            <td>Search employees by name — returns a list of matches with codes</td>
-            <td>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
+            <td><span class="tag blue">employee</span></td>
+            <td>&#9989;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td>
           </tr>
           <tr>
-            <td class="tn">list_employees</td>
-            <td>List all employees, optionally filtered by department (case-insensitive)</td>
-            <td>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
+            <td><span class="tag green">hr_staff</span></td>
+            <td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td>
           </tr>
           <tr>
-            <td class="tn">get_employee_data</td>
-            <td>Retrieve full details for a single employee by employee_code</td>
-            <td>
-              <span class="rb r-emp">employee</span>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
+            <td><span class="tag yellow">hr_manager</span></td>
+            <td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td>
           </tr>
           <tr>
-            <td class="tn">get_leave_balance</td>
-            <td>Get remaining annual leave days for an employee</td>
-            <td>
-              <span class="rb r-emp">employee</span>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
-          </tr>
-          <tr>
-            <td class="tn">get_employee_summary</td>
-            <td>Full profile + leave balance in one call — avoids multiple round trips to the LLM</td>
-            <td>
-              <span class="rb r-emp">employee</span>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
-          </tr>
-          <tr>
-            <td class="tn">get_employee_documents</td>
-            <td>List all documents previously generated for an employee</td>
-            <td>
-              <span class="rb r-emp">employee</span>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
-          </tr>
-          <tr>
-            <td class="tn">calculate_end_of_service</td>
-            <td>Calculate end-of-service gratuity under Egyptian Labor Law</td>
-            <td>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
-          </tr>
-          <tr class="cat"><td colspan="3">Document Generation Tools</td></tr>
-          <tr>
-            <td class="tn">generate_salary_certificate</td>
-            <td>Generate official salary certificate PDF — restricted to hr_manager and above</td>
-            <td>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
-          </tr>
-          <tr>
-            <td class="tn">generate_twimc_letter</td>
-            <td>Generate "To Whom It May Concern" employment letter PDF</td>
-            <td>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
-          </tr>
-          <tr>
-            <td class="tn">generate_experience_certificate</td>
-            <td>Generate experience certificate confirming employment history</td>
-            <td>
-              <span class="rb r-hrs">hr_staff</span>
-              <span class="rb r-hrm">hr_manager</span>
-              <span class="rb r-adm">admin</span>
-            </td>
+            <td><span class="tag purple">admin</span></td>
+            <td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td>
           </tr>
         </tbody>
       </table>
     </div>
-  </section>
+    <p class="footnote" style="margin-top:0.75rem">Row-level: HR roles see all employees in the tenant. An employee can only access their own record, matched via <code>employee_code</code> in ToolContext — enforced in every tool via <code>_can_access_employee()</code>.</p>
+  </div>
 
-  <!-- ─────────────────── 5. Database Schema ─────────────────── -->
-  <section id="db">
-    <h2><span class="sn">5</span> Database Schema</h2>
-    <p class="desc">PostgreSQL with four tables. Every row in users, employees, and audit_log is scoped to a tenant_id UUID — this is the architectural foundation of multi-tenant isolation. No query can reach another company's data without knowing their UUID.</p>
-    <div class="box">
-      <div class="mermaid">
-erDiagram
-    TENANTS {
-        uuid id PK
-        text name
-        text slug
-        timestamptz created_at
-    }
-    USERS {
-        uuid id PK
-        uuid tenant_id FK
-        text email
-        text full_name
-        text role
-        uuid employee_id
-        timestamptz created_at
-    }
-    EMPLOYEES {
-        uuid id PK
-        uuid tenant_id FK
-        text employee_code
-        text full_name
-        text arabic_name
-        text position
-        text department
-        text employment_type
-        date start_date
-        numeric basic_salary
-        numeric housing_allowance
-        numeric transport_allowance
-        numeric total_salary
-        text currency
-        int annual_leave_balance
-        text email
-        text manager_name
-        timestamptz created_at
-    }
-    AUDIT_LOG {
-        bigserial id PK
-        uuid tenant_id
-        text actor_user_id
-        text actor_role
-        text tool_name
-        jsonb tool_input
-        text outcome
-        text authz_decision
-        text result_summary
-        int latency_ms
-        timestamptz created_at
-    }
-
-    TENANTS ||--o{ USERS : "has"
-    TENANTS ||--o{ EMPLOYEES : "has"
-    TENANTS ||--o{ AUDIT_LOG : "has"
+  <div class="card">
+    <h3><span class="dot" style="background:#ef4444"></span>Hard Security Rules</h3>
+    <div class="grid-2">
+      <div class="security-item">
+        <span class="icon">&#9940;</span>
+        <div><h4>No SDK import outside llm/claude.py</h4><p>Anthropic SDK imported in exactly one file. Prevents prompt injection via rogue tool or middleware files.</p></div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#9940;</span>
+        <div><h4>No direct DB queries in tools</h4><p>All data access via the DataSource abstraction. Row-Level Security cannot be bypassed by a raw connection from a tool.</p></div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#9940;</span>
+        <div><h4>No access control in the system prompt</h4><p>RBAC lives in tools + RLS. A jailbreak cannot override database-enforced permissions — the permission check is not a text instruction.</p></div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#9940;</span>
+        <div><h4>LLM never does math</h4><p>Leave durations, EOS gratuity calculations — all deterministic Python. A wrong number on a legal document is a lawsuit.</p></div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#9940;</span>
+        <div><h4>Uploaded documents are data, not instructions</h4><p>Resumes and certificates are OCR-extracted to structured fields. Raw uploaded content never enters a context that can trigger tool calls.</p></div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#9940;</span>
+        <div><h4>No live self-modifying prompts in production</h4><p>Offline prompt optimization (DSPy) produces frozen, version-controlled, human-reviewed artifacts. Live optimizer access to RBAC prompts is prohibited.</p></div>
       </div>
     </div>
-  </section>
+  </div>
+</div>
 
-  <!-- ─────────────────── 6. Multi-Tenant ─────────────────── -->
-  <section id="mt">
-    <h2><span class="sn">6</span> Multi-Tenant Data Isolation</h2>
-    <p class="desc">One database serves multiple companies simultaneously. A tenant_id UUID is a foreign key on every data table. Every SQL query in the codebase includes WHERE tenant_id = %s — it is architecturally impossible for Fotopia to read Acme Corp's data through the same API.</p>
-    <div class="box">
-      <div class="mermaid">
-flowchart TD
-    subgraph DB["PostgreSQL — Shared Database"]
-        subgraph T1["Tenant: Fotopia  (id: af5e8525...)"]
-            E1["employees\nNourhan, Saif, Omar"]
-            AL1["audit_log\nall Fotopia actions"]
-        end
-        subgraph T2["Tenant: Acme Corp  (id: 9b2c1140...)"]
-            E2["employees\nAlice, Bob, Carol"]
-            AL2["audit_log\nall Acme actions"]
-        end
-    end
+<!-- ══════════════════════════════════════ TAB 5: HARDWARE ════════════════════════════════════ -->
+<div id="tab-hardware" class="tab-pane">
+  <div class="section-header">
+    <h2>Hardware Requirements</h2>
+    <p>Requirements for running the full stack: PostgreSQL, FastAPI, React frontend, IMAP listener, and email service.</p>
+  </div>
 
-    P1["Phase 1\nTENANT_SLUG env var\nresolved at startup"] --> FA
-    P2["Phase 2\nJWT token per request\ntenant from token claims"] --> FA
+  <div class="hw-grid">
+    <div class="hw-card">
+      <h4>Minimum — Development / Demo</h4>
+      <div class="hw-row"><span class="hw-label">CPU</span><span class="hw-val">2 vCPU (x86_64 or ARM64)</span></div>
+      <div class="hw-row"><span class="hw-label">RAM</span><span class="hw-val">4 GB</span></div>
+      <div class="hw-row"><span class="hw-label">Storage</span><span class="hw-val">20 GB SSD</span></div>
+      <div class="hw-row"><span class="hw-label">OS</span><span class="hw-val">macOS 13+ or Ubuntu 22.04</span></div>
+      <div class="hw-row"><span class="hw-label">Container</span><span class="hw-val">Docker Desktop 4.x</span></div>
+      <div class="hw-row"><span class="hw-label">Network</span><span class="hw-val">10 Mbps broadband</span></div>
+    </div>
+    <div class="hw-card">
+      <h4>Recommended — Staging / Production</h4>
+      <div class="hw-row"><span class="hw-label">CPU</span><span class="hw-val">4 vCPU (x86_64)</span></div>
+      <div class="hw-row"><span class="hw-label">RAM</span><span class="hw-val">8 GB</span></div>
+      <div class="hw-row"><span class="hw-label">Storage</span><span class="hw-val">100 GB NVMe SSD</span></div>
+      <div class="hw-row"><span class="hw-label">OS</span><span class="hw-val">Ubuntu 22.04 LTS</span></div>
+      <div class="hw-row"><span class="hw-label">Container</span><span class="hw-val">Docker Engine + Compose v2</span></div>
+      <div class="hw-row"><span class="hw-label">Network</span><span class="hw-val">100 Mbps, static IP</span></div>
+    </div>
+  </div>
 
-    FA["Fotopia HR Agent\ntenant_id: af5e8525"] -->|"WHERE tenant_id = af5e8525"| E1
-    FA -->|"WHERE tenant_id = af5e8525"| AL1
-    FA -. "blocked — cannot access" .-> E2
+  <div class="card">
+    <h3><span class="dot" style="background:#06b6d4"></span>Network Port Requirements</h3>
+    <table>
+      <thead><tr><th>Port</th><th>Protocol</th><th>Direction</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>443</code></td><td>HTTPS / TLS</td><td>Outbound</td><td>Anthropic API · Odoo ERP · Azure services</td></tr>
+        <tr><td><code>587</code></td><td>SMTP + STARTTLS</td><td>Outbound</td><td>Email delivery via Office 365</td></tr>
+        <tr><td><code>993</code></td><td>IMAP over SSL</td><td>Outbound</td><td>Approval reply listener — Gmail</td></tr>
+        <tr><td><code>8000</code></td><td>HTTP</td><td>Inbound (internal)</td><td>FastAPI — expose only via reverse proxy (nginx/Caddy)</td></tr>
+        <tr><td><code>5432</code></td><td>PostgreSQL</td><td>Internal only</td><td>Database — must NOT be exposed to host in production</td></tr>
+        <tr><td><code>80 / 443</code></td><td>HTTP / HTTPS</td><td>Inbound (public)</td><td>Reverse proxy — TLS termination point</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:#22c55e"></span>Container Resource Allocation</h3>
+    <table>
+      <thead><tr><th>Service</th><th>Image</th><th>Memory (min)</th><th>Memory (rec)</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>backend</code></td>
+          <td><code>python:3.11-slim</code></td>
+          <td>512 MB</td>
+          <td>1 GB</td>
+          <td>FastAPI + Uvicorn workers + IMAP listener thread</td>
+        </tr>
+        <tr>
+          <td><code>db</code></td>
+          <td><code>pgvector/pgvector:pg15</code></td>
+          <td>512 MB</td>
+          <td>2 GB</td>
+          <td>PostgreSQL <code>shared_buffers</code> should be ~25% of available RAM</td>
+        </tr>
+        <tr>
+          <td><code>frontend</code> (dev)</td>
+          <td>Node 20 / Vite</td>
+          <td>256 MB</td>
+          <td>512 MB</td>
+          <td>Production: compiled static files served by nginx — no Node runtime needed</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════ TAB 6: TOOLS ═════════════════════════════════════ -->
+<div id="tab-tools" class="tab-pane">
+  <div class="section-header">
+    <h2>Tools &amp; System Access Inventory</h2>
+    <p>All external services the system integrates with. All credentials are stored in <code>.env</code> — never in source code.</p>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Purpose</th>
+          <th>Protocol</th>
+          <th>Account / Endpoint</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Anthropic Claude API</strong></td>
+          <td>Primary LLM — tool_use loop, intent parsing, response generation</td>
+          <td>HTTPS REST</td>
+          <td><code>ANTHROPIC_API_KEY</code> in .env<br/><span style="color:var(--text-3);font-size:0.75rem">Rotate before production go-live</span></td>
+          <td><span class="pill live">Live</span></td>
+        </tr>
+        <tr>
+          <td><strong>PostgreSQL 15</strong></td>
+          <td>Primary database — employees, leave requests, audit log, documents, tenants, workflow state</td>
+          <td>TCP 5432</td>
+          <td><code>POSTGRES_PASSWORD</code> in .env<br/><code>DATABASE_URL</code> assembled in config.py</td>
+          <td><span class="pill live">Live</span></td>
+        </tr>
+        <tr>
+          <td><strong>Office 365 SMTP</strong></td>
+          <td>Outbound email — leave notifications, approval request emails, employee confirmations</td>
+          <td>SMTP + STARTTLS<br/>port 587</td>
+          <td><code>fotoagent@fotopiatech.com</code><br/><code>SMTP_PASSWORD</code> in .env</td>
+          <td><span class="pill live">Live</span></td>
+        </tr>
+        <tr>
+          <td><strong>Gmail IMAP</strong></td>
+          <td>Inbound bidirectional listener — receives manager email replies to approve or reject leave</td>
+          <td>IMAP over SSL<br/>port 993</td>
+          <td><code>hr.agent.fotopia@gmail.com</code><br/>App Password in <code>IMAP_PASSWORD</code></td>
+          <td><span class="pill live">Live</span></td>
+        </tr>
+        <tr>
+          <td><strong>Odoo ERP (WIN Holding)</strong></td>
+          <td>Leave sync — approved leaves are automatically created in Odoo via XML-RPC after approval</td>
+          <td>HTTPS XML-RPC v2</td>
+          <td>WIN Holding staging environment<br/><code>ODOO_URL</code>, <code>ODOO_USERNAME</code>, <code>ODOO_PASSWORD</code> in .env</td>
+          <td><span class="pill live">Live</span></td>
+        </tr>
+        <tr>
+          <td><strong>Azure Communication Services</strong></td>
+          <td>Enterprise transactional email sender — production-grade alternative to SMTP once provisioned</td>
+          <td>HTTPS REST<br/>(azure-communication-email 1.0.0)</td>
+          <td><code>AZURE_COMMUNICATION_CONNECTION_STRING</code> = empty (SMTP fallback active)<br/>Sender: <code>hr-agent@fotopia.ai</code></td>
+          <td><span class="pill ready">Ready — not activated</span></td>
+        </tr>
+        <tr>
+          <td><strong>Grok / XAI API</strong></td>
+          <td>Alternative LLM — drop-in Claude replacement; switch with one env var, no tool changes</td>
+          <td>HTTPS REST</td>
+          <td><code>XAI_API_KEY</code> in .env<br/><code>LLM_PROVIDER=grok</code> to activate</td>
+          <td><span class="pill ready">Ready</span></td>
+        </tr>
+        <tr>
+          <td><strong>pgvector (PostgreSQL extension)</strong></td>
+          <td>Semantic vector search for RAG/knowledge layer — embedded in the pg15 Docker image</td>
+          <td>PostgreSQL extension</td>
+          <td>Bundled in <code>pgvector/pgvector:pg15</code> — no extra credentials needed</td>
+          <td><span class="pill planned">Phase 3</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid-2">
+
+    <div class="card">
+      <h3><span class="dot" style="background:#22c55e"></span>Email Architecture Summary</h3>
+      <div class="security-item">
+        <span class="icon">&#128228;</span>
+        <div>
+          <h4>Outbound — Office 365 SMTP</h4>
+          <p>Sent FROM <code>fotoagent@fotopiatech.com</code>. The <code>Reply-To</code> header is set to the Gmail IMAP address so manager replies land in the listener inbox, not the Office 365 inbox.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128229;</span>
+        <div>
+          <h4>Inbound — Gmail IMAP listener</h4>
+          <p>Polls <code>hr.agent.fotopia@gmail.com</code> every 3 seconds. Parses APPROVE/REJECT replies from managers and routes to <code>/api/leave/resolve</code>.</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">&#128100;</span>
+        <div>
+          <h4>Delivery target (<code>notification_email</code>)</h4>
+          <p>Each employee has a <code>notification_email</code> field decoupled from <code>employees.email</code>. The former is the delivery address; the latter is the Odoo/identity lookup key.</p>
+        </div>
       </div>
     </div>
-  </section>
 
-  <!-- ─────────────────── 7. Security ─────────────────── -->
-  <section id="sec">
-    <h2><span class="sn">7</span> Security Architecture</h2>
-    <p class="desc">Defence in depth — four independent layers between a request and the data. A failure in any single layer does not compromise the system because the remaining three still enforce access control independently.</p>
-    <div class="box">
-      <div class="mermaid">
-flowchart TD
-    REQ(["Incoming Request"]) --> L1
-
-    subgraph L1["Layer 1 — Tool Visibility"]
-        TS["get_specs_for_role\nLLM only sees tools its role is allowed to call\nIt cannot attempt what it cannot see"]
-    end
-
-    L1 --> L2
-
-    subgraph L2["Layer 2 — Execute Authorization"]
-        EA["registry.execute — second role check\nEven if the LLM calls a disallowed tool\nthe registry blocks it before any code runs"]
-    end
-
-    L2 --> L3
-
-    subgraph L3["Layer 3 — Tenant Row Isolation"]
-        TI["Every SQL includes WHERE tenant_id = x\nData from other tenants is invisible\nNo code path can bypass this"]
-    end
-
-    L3 --> L4
-
-    subgraph L4["Layer 4 — Immutable Audit Trail"]
-        AT["INSERT into audit_log on every execution\nRecords: actor, role, tool, input, outcome, latency\nNon-repudiable record for compliance"]
-    end
-
-    L4 --> RESP(["Response Returned"])
-
-    style L1 fill:#1e2a5e,stroke:#1e40af
-    style L2 fill:#3b1e5e,stroke:#6d28d9
-    style L3 fill:#1e3a2f,stroke:#166534
-    style L4 fill:#5e3d1e,stroke:#92400e
+    <div class="card">
+      <h3><span class="dot" style="background:#a855f7"></span>Demo Run Checklist</h3>
+      <div class="security-item">
+        <span class="icon">1&#65039;&#8419;</span>
+        <div>
+          <h4>Reset demo state</h4>
+          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem;word-break:break-all">docker exec fotopia-hr-agent-backend-1 python /app/scripts/demo_reset.py</p>
+          <p style="margin-top:0.25rem">Clears leave requests, approvals, audit log. Resets balances. Cleans Odoo synced leaves.</p>
+        </div>
       </div>
-    </div>
-  </section>
-
-  <!-- ─────────────────── 8. Frontend ─────────────────── -->
-  <section id="fe">
-    <h2><span class="sn">8</span> Frontend Component Tree</h2>
-    <p class="desc">React SPA built with Vite. All chat state lives in ChatInterface. MessageBubble routes agent responses through ReactMarkdown so tables, bold text, lists, and code blocks all render correctly — user messages stay as plain text.</p>
-    <div class="box">
-      <div class="mermaid">
-flowchart TD
-    MAIN["main.jsx\nReact entry point"] --> APP
-
-    subgraph APP["App.jsx — Page Layout"]
-        SB["Sidebar\nHR Agent active\nFinance, Legal, Admin → Phase 2"]
-        TB["Topbar\nLogged in as: Nourhan Hosny (HR Manager)"]
-        CI["ChatInterface.jsx"]
-    end
-
-    subgraph CI["ChatInterface.jsx"]
-        ST["State: messages, input,\nloading, sessionId"]
-        SG["Suggestion chips\n4 prompts shown on first load"]
-        ML["messages.map"]
-        INP["Textarea + Send button"]
-        AC["api.js\nsendChat / documentUrl"]
-    end
-
-    ML --> MB
-
-    subgraph MB["MessageBubble.jsx"]
-        UM["User bubble\nplain text span"]
-        AM["Agent bubble"]
-        RM["ReactMarkdown + remark-gfm\ntables, lists, bold, code, headings"]
-        DC["DocumentCard.jsx\nPDF download link\nlabel + employee name"]
-    end
-
-    AM --> RM
-    AM --> DC
+      <div class="security-item">
+        <span class="icon">2&#65039;&#8419;</span>
+        <div>
+          <h4>Verify all containers running</h4>
+          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem">docker compose ps</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">3&#65039;&#8419;</span>
+        <div>
+          <h4>After a full restart — re-copy Odoo sync module</h4>
+          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem;word-break:break-all">docker cp backend/services/odoo_sync.py fotopia-hr-agent-backend-1:/app/services/odoo_sync.py</p>
+        </div>
+      </div>
+      <div class="security-item">
+        <span class="icon">4&#65039;&#8419;</span>
+        <div>
+          <h4>Health check</h4>
+          <p style="font-family:'JetBrains Mono',monospace;font-size:0.73rem">curl localhost:8000/health</p>
+        </div>
       </div>
     </div>
 
-    <div class="phases">
-      <div class="pc">
-        <h4>Phase 1 — Demo (Current)</h4>
-        <ul>
-          <li>Hardcoded user: Nourhan Hosny (hr_manager)</li>
-          <li>Tenant resolved from TENANT_SLUG env var</li>
-          <li>Conversation history in-memory (session dict)</li>
-          <li>LLM swappable: Claude or Grok via env var</li>
-          <li>3 demo employees seeded in database</li>
-        </ul>
-      </div>
-      <div class="pc">
-        <h4>Phase 2 — Production</h4>
-        <ul>
-          <li>JWT authentication per request</li>
-          <li>Tenant + role resolved from token claims</li>
-          <li>Redis for session storage (survives restarts)</li>
-          <li>Managed cloud DB: AWS RDS or Supabase</li>
-          <li>Finance, Legal, and Admin agents live</li>
-          <li>Employee self-service portal</li>
-        </ul>
-      </div>
-    </div>
-  </section>
+  </div>
 
-</main>
+  <div class="card">
+    <h3><span class="dot" style="background:#ef4444"></span>Open Business / Legal Items</h3>
+    <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:1rem">These are not engineering blockers for the demo. They block real-client production go-live.</p>
+    <table>
+      <thead><tr><th>#</th><th>Item</th><th>Owner</th><th>Blocks</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><strong>Egypt PDPL cross-border transfer</strong> — does routing tenant data through Anthropic's cloud API require a PDPC license?</td>
+          <td>Dr. Ahmed / Raef</td>
+          <td>Real-client go-live (demo runs on synthetic data only)</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><strong>DPO appointment</strong> — PDPL requires a registered Data Protection Officer before processing salary and national ID at scale</td>
+          <td>Dr. Ahmed / Raef</td>
+          <td>Production launch with sensitive data</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><strong>HITL approval ownership</strong> — who is the designated human approver for onboarding gated actions (create_employee_record, enroll_social_insurance)?</td>
+          <td>Nourhan Hosny</td>
+          <td>Phase 3 onboarding state machine</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><strong>Anthropic ZDR agreement</strong> — Zero Data Retention to be signed in parallel with PDPL resolution</td>
+          <td>Dr. Ahmed / Raef</td>
+          <td>Real client data through cloud Claude</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+</div><!-- end .content -->
 
 <script>
   mermaid.initialize({
     startOnLoad: true,
     theme: 'dark',
     themeVariables: {
-      background: '#0d1018',
-      primaryColor: '#1a1d2e',
-      primaryTextColor: '#e8e8f0',
-      primaryBorderColor: '#2d3561',
-      lineColor: '#4f5fa8',
-      secondaryColor: '#0f1117',
-      tertiaryColor: '#111420',
-      actorBkg: '#1a1d2e',
-      actorBorder: '#2d3561',
-      actorTextColor: '#e8e8f0',
-      actorLineColor: '#4f5fa8',
-      signalColor: '#a5b4fc',
-      signalTextColor: '#e8e8f0',
-      labelBoxBkgColor: '#1a1d2e',
-      labelBoxBorderColor: '#2d3561',
-      labelTextColor: '#e8e8f0',
-      loopTextColor: '#a5b4fc',
-      noteBkgColor: '#1a1d2e',
-      noteTextColor: '#e8e8f0',
-      fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif',
+      background:          '#161b22',
+      primaryColor:        '#1c2231',
+      primaryTextColor:    '#f0f6fc',
+      primaryBorderColor:  '#30363d',
+      lineColor:           '#4a5568',
+      secondaryColor:      '#0d1117',
+      tertiaryColor:       '#0d1117',
+      edgeLabelBackground: '#161b22',
+      actorBkg:            '#1c2231',
+      actorBorder:         '#4a5568',
+      actorTextColor:      '#f0f6fc',
+      actorLineColor:      '#4a5568',
+      signalColor:         '#8b949e',
+      signalTextColor:     '#f0f6fc',
+      noteBkgColor:        '#1f2937',
+      noteTextColor:       '#f0f6fc',
+      noteBorderColor:     '#4a5568',
+      activationBorderColor: '#2563eb',
+      activationBkgColor:  'rgba(37,99,235,0.15)',
+      sequenceNumberColor: '#f0f6fc',
+      fontSize:            '13px',
     },
-    flowchart: { curve: 'basis', padding: 20 },
-    sequence: { actorMargin: 50, messageMargin: 25, useMaxWidth: true },
+    sequence: {
+      diagramMarginX:  20,
+      diagramMarginY:  15,
+      actorMargin:     40,
+      width:           160,
+      height:          50,
+      boxMargin:       10,
+      boxTextMargin:   5,
+      noteMargin:      10,
+      messageMargin:   30,
+      mirrorActors:    false,
+    }
   });
 
-  // Highlight active sidebar link on scroll
-  const sections = document.querySelectorAll('section[id]');
-  const links = document.querySelectorAll('nav a');
-  const io = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (e.isIntersecting) {
-        links.forEach(l => l.classList.remove('active'));
-        const a = document.querySelector(`nav a[href="#${e.target.id}"]`);
-        if (a) a.classList.add('active');
-      }
-    });
-  }, { threshold: 0.25 });
-  sections.forEach(s => io.observe(s));
+  function switchTab(name, btn) {
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    btn.classList.add('active');
+    try { mermaid.run(); } catch(e) {}
+  }
 </script>
 </body>
 </html>

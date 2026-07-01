@@ -43,10 +43,10 @@ ANNUAL_START = "2026-08-18"
 ANNUAL_END   = "2026-08-20"   # 3 days
 ANNUAL_DAYS  = 3
 
-OVERLAP_START = "2026-07-08"
-OVERLAP_END   = "2026-07-10"  # 3 days – used for overlap detection test
-OVERLAP_LATER_START = "2026-07-09"
-OVERLAP_LATER_END   = "2026-07-12"  # overlaps the first request
+OVERLAP_START = "2026-07-15"
+OVERLAP_END   = "2026-07-17"  # 3 days (Wed–Fri) – used for overlap detection test
+OVERLAP_LATER_START = "2026-07-16"
+OVERLAP_LATER_END   = "2026-07-21"  # overlaps first request on Jul 16–17
 
 WFH_WEEK1_START = "2026-08-03"  # Monday
 WFH_WEEK1_END   = "2026-08-04"  # Tuesday – 2 days (reaches weekly limit)

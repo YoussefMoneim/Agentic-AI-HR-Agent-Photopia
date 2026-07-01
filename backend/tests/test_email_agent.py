@@ -314,29 +314,64 @@ def test_reply_sets_in_reply_to_header():
 
 class TestIntentClassification:
 
-    def test_leave_request_detected(self):
-        """'take leave' keyword → leave_request intent."""
+    @patch("services.email_agent.ClaudeProvider")
+    def test_leave_request_detected(self, mock_cls):
+        """LLM returns leave_request with extracted dates — natural language parsed correctly."""
+        import json
+        mock_cls.return_value.classify.return_value = json.dumps({
+            "intent": "leave_request", "confidence": "high",
+            "extracted_params": {"leave_type": "annual", "start_date": "2026-08-01",
+                                 "end_date": "2026-08-14", "reason": None},
+            "reason": "Employee wants annual leave first two weeks of August",
+        })
         from services.email_agent import _classify_intent
-        result = _classify_intent("I want to take 3 days annual leave next week")
-        assert result == "leave_request"
+        result = _classify_intent("I want a holiday first two weeks of august")
+        assert result.intent == "leave_request"
+        assert result.confidence == "high"
+        assert result.extracted_params["start_date"] == "2026-08-01"
+        assert result.extracted_params["end_date"] == "2026-08-14"
 
-    def test_leave_cancellation_detected_before_request(self):
-        """'cancel my leave request' → cancellation wins over request (more specific)."""
+    @patch("services.email_agent.ClaudeProvider")
+    def test_leave_cancellation_detected(self, mock_cls):
+        """LLM returns leave_cancellation for cancel request."""
+        import json
+        mock_cls.return_value.classify.return_value = json.dumps({
+            "intent": "leave_cancellation", "confidence": "high",
+            "extracted_params": {"leave_type": None, "start_date": None,
+                                 "end_date": None, "reason": None},
+            "reason": "Cancel keyword detected",
+        })
         from services.email_agent import _classify_intent
         result = _classify_intent("I want to cancel my leave request")
-        assert result == "leave_cancellation"
+        assert result.intent == "leave_cancellation"
 
-    def test_balance_keywords_detected(self):
-        """'remaining leave balance' → leave_balance intent."""
+    @patch("services.email_agent.ClaudeProvider")
+    def test_balance_check_detected(self, mock_cls):
+        """LLM returns balance_check for balance query."""
+        import json
+        mock_cls.return_value.classify.return_value = json.dumps({
+            "intent": "balance_check", "confidence": "high",
+            "extracted_params": {"leave_type": None, "start_date": None,
+                                 "end_date": None, "reason": None},
+            "reason": "Balance query detected",
+        })
         from services.email_agent import _classify_intent
         result = _classify_intent("What is my remaining leave balance?")
-        assert result == "leave_balance"
+        assert result.intent == "balance_check"
 
-    def test_arabic_balance_keyword(self):
-        """Arabic رصيد → leave_balance intent."""
+    @patch("services.email_agent.ClaudeProvider")
+    def test_arabic_balance_keyword(self, mock_cls):
+        """LLM handles Arabic balance query."""
+        import json
+        mock_cls.return_value.classify.return_value = json.dumps({
+            "intent": "balance_check", "confidence": "high",
+            "extracted_params": {"leave_type": None, "start_date": None,
+                                 "end_date": None, "reason": None},
+            "reason": "Arabic balance keyword detected",
+        })
         from services.email_agent import _classify_intent
         result = _classify_intent("ما هو رصيد إجازتي")
-        assert result == "leave_balance"
+        assert result.intent == "balance_check"
 
 
 # ── Part 2: Handler unit tests ─────────────────────────────────────────────────

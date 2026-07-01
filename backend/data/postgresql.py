@@ -70,7 +70,7 @@ class PostgreSQLDataSource(DataSource):
                     SELECT id, employee_code, full_name, arabic_name, position, department,
                            employment_type, start_date, basic_salary, housing_allowance,
                            transport_allowance, total_salary, currency, annual_leave_balance,
-                           email, manager_name, manager_id
+                           email, notification_email, manager_name, manager_id
                     FROM employees
                     WHERE tenant_id = %s
                       AND employee_code = %s
@@ -1929,7 +1929,7 @@ class PostgreSQLDataSource(DataSource):
         self,
         tenant_id: str,
         sender_email: str,
-        max_per_hour: int = 5,
+        max_per_hour: int = 10,
         block_minutes: int = 60,
     ) -> dict:
         conn = self._conn()
