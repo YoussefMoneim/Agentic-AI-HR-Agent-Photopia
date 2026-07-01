@@ -1,23 +1,4 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- Application role: non-superuser so RLS FORCE policies actually apply.
--- Superusers bypass RLS even with FORCE; fotopia_app is exempt from that exemption.
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fotopia_app') THEN
-        CREATE ROLE fotopia_app LOGIN PASSWORD 'fotopia_app';
-    END IF;
-END
-$$;
-
-GRANT USAGE ON SCHEMA public TO fotopia_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO fotopia_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO fotopia_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO fotopia_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO fotopia_app;
 
 -- One row per customer company. Everything else is scoped to a tenant_id.
 CREATE TABLE tenants (
@@ -53,7 +34,6 @@ CREATE TABLE employees (
     department TEXT,
     employment_type TEXT,
     start_date DATE,
-    birth_date DATE,          -- used for age ≥50 → 30-day annual leave allocation advisory
     basic_salary NUMERIC(12,2),
     housing_allowance NUMERIC(12,2) DEFAULT 0,
     transport_allowance NUMERIC(12,2) DEFAULT 0,
@@ -61,11 +41,6 @@ CREATE TABLE employees (
     currency TEXT DEFAULT 'EGP',
     annual_leave_balance INTEGER DEFAULT 0,  -- deprecated: superseded by leave_balances table
     email TEXT,
-    notification_email TEXT,         -- if set, approval notifications go here instead of email
-    gender TEXT,
-    national_id TEXT,
-    phone_number TEXT,
-    employment_status TEXT NOT NULL DEFAULT 'active',
     manager_name TEXT,       -- legacy free-text; manager_id FK is authoritative
     manager_id UUID REFERENCES employees(id),  -- direct manager; self-referential FK
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -93,11 +68,8 @@ CREATE TABLE audit_log (
 );
 
 -- ─── Leave types ──────────────────────────────────────────────────────────────
--- 19 types: annual, sick, emergency, permission, business_trip, wfh,
---           outside_duty, compensatory, unpaid (legacy),
---           marriage, hajj, umrah, military_summon, educational,
---           funeral (inactive — use degree-split types below), maternity, paternity,
---           funeral_1st_degree, funeral_2nd_degree  (WIN policy HR/BTE 001/7-2025)
+-- 8 supported types: annual, sick, emergency, permission, business_trip,
+--                    wfh, outside_duty, compensatory  (+ unpaid legacy)
 CREATE TABLE leave_types (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id),
@@ -106,13 +78,11 @@ CREATE TABLE leave_types (
     name_ar TEXT,
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
     requires_documentation BOOLEAN NOT NULL DEFAULT FALSE,
-    deducts_balance BOOLEAN NOT NULL DEFAULT TRUE,      -- FALSE: emergency, permission, business_trip, wfh, outside_duty, occasion types
+    deducts_balance BOOLEAN NOT NULL DEFAULT TRUE,      -- FALSE: emergency, permission, business_trip, wfh, outside_duty
     is_time_based BOOLEAN NOT NULL DEFAULT FALSE,       -- TRUE only for Permission (hours, not days)
-    requires_hr_review BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE: annual, sick, emergency, business_trip, compensatory, unpaid, marriage, hajj, umrah, military_summon, funeral, maternity
-    max_days_per_year INTEGER,          -- NULL = no annual cap
-    max_consecutive_days INTEGER,       -- NULL = no per-request limit
-    max_times_in_career INTEGER,        -- NULL = no career cap (marriage=1, hajj=1, umrah=1, maternity=3, paternity=3)
-    service_min_days INTEGER NOT NULL DEFAULT 0,  -- minimum employment days before eligible (marriage/umrah=365, hajj=1825)
+    requires_hr_review BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE: annual, sick, emergency, business_trip, compensatory, unpaid
+    max_days_per_year INTEGER,    -- NULL = no annual cap
+    max_consecutive_days INTEGER, -- NULL = no per-request limit
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     UNIQUE (tenant_id, code)
 );
@@ -130,8 +100,6 @@ CREATE TABLE leave_balances (
     used_days NUMERIC(5,1) NOT NULL DEFAULT 0,        -- approved and completed requests
     pending_days NUMERIC(5,1) NOT NULL DEFAULT 0,     -- in-flight: submitted but not yet resolved
     carry_over_days NUMERIC(5,1) NOT NULL DEFAULT 0,
-    carry_over_expiry_date DATE,                       -- carry-over expires March 31 of the balance year (Q1 only)
-    casual_used_days NUMERIC(5,1) NOT NULL DEFAULT 0, -- annual leave casual sub-quota (max 7 of 21 days, max 2 consecutive)
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, employee_id, leave_type_id, year)
 );
@@ -157,7 +125,6 @@ CREATE TABLE leave_requests (
     reason TEXT,
     attachment_path TEXT,              -- path to uploaded medical cert, etc.
     has_medical_certificate BOOLEAN NOT NULL DEFAULT FALSE,
-    is_casual BOOLEAN NOT NULL DEFAULT FALSE,  -- annual leave: casual (≤2 consecutive days) vs regular
 
     -- Approval chain — manager stored at submission from DB, never from user input
     manager_id UUID REFERENCES employees(id),
@@ -179,19 +146,8 @@ CREATE TABLE leave_requests (
             'pending_top_of_hierarchy',
             'manager_approved', 'manager_rejected',
             'hr_approved', 'hr_rejected',
-            'cancellation_pending',
             'cancelled', 'withdrawn', 'completed'
         )),
-
-    -- Cancellation tracking (populated when employee requests cancellation of an approved leave)
-    cancellation_requested_at    TIMESTAMPTZ,
-    cancellation_reason          TEXT,
-    cancellation_requested_by_id UUID REFERENCES employees(id),
-    cancellation_decided_at      TIMESTAMPTZ,
-    cancellation_decided_by_id   UUID REFERENCES employees(id),
-    cancellation_reject_reason   TEXT,
-    consumed_days                NUMERIC(5,1),
-    -- consumed_days: HR fills when leave was in progress. days_restored = days_requested - consumed_days.
 
     -- Legacy fields — kept for resolve_pending_action compatibility
     resolved_by UUID REFERENCES employees(id),
@@ -214,9 +170,6 @@ CREATE INDEX idx_leave_requests_tenant ON leave_requests(tenant_id, status, subm
 CREATE INDEX idx_leave_requests_employee ON leave_requests(tenant_id, employee_id, status);
 CREATE INDEX idx_leave_requests_manager ON leave_requests(tenant_id, manager_id, status);
 CREATE INDEX ON leave_requests(workflow_instance_id) WHERE workflow_instance_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_leave_requests_cancellation_pending
-    ON leave_requests(tenant_id, cancellation_requested_at)
-    WHERE status = 'cancellation_pending';
 
 -- ─── Leave policies ───────────────────────────────────────────────────────────
 -- One row per (tenant, leave_type). Flat model — no JSONB rules.
@@ -370,93 +323,22 @@ CREATE POLICY tenant_isolation ON audit_log FOR ALL
     USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
     WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
 
--- ─── RAG knowledge base ─────────────────────────────────────────────────────
+-- ─── Application role (non-superuser so RLS policies actually enforce) ────────
+-- Superusers bypass RLS even with FORCE. The app must SET ROLE fotopia_app so
+-- row-level policies apply. This block is idempotent and safe to re-run.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fotopia_app') THEN
+        CREATE ROLE fotopia_app LOGIN PASSWORD 'fotopia_app';
+    END IF;
+END
+$$;
 
--- Tier 1: public knowledge chunks (labour law, public references)
--- No tenant, no ACL — shared across all tenants.
-CREATE TABLE IF NOT EXISTS public_knowledge_chunks (
-    id          BIGSERIAL PRIMARY KEY,
-    source      TEXT NOT NULL,
-    chunk_index INT NOT NULL,
-    content     TEXT NOT NULL,
-    embedding   vector(1536),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS public_knowledge_chunks_embedding_idx
-    ON public_knowledge_chunks USING hnsw (embedding vector_cosine_ops);
+GRANT USAGE ON SCHEMA public TO fotopia_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO fotopia_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO fotopia_app;
 
--- Tier 2/3: private document chunks (tenant-scoped, ACL-enforced)
--- classified_at is nullable: NULL = quarantine; ingestion sets to now() at classification time.
--- content_tsv is auto-computed from content for full-text search.
-CREATE TABLE IF NOT EXISTS private_document_chunks (
-    id              BIGSERIAL PRIMARY KEY,
-    tenant_id       UUID NOT NULL REFERENCES tenants(id),
-    document_id     TEXT NOT NULL,
-    chunk_index     INT NOT NULL,
-    content         TEXT NOT NULL,
-    embedding       vector(1536),
-    sensitivity     TEXT NOT NULL DEFAULT 'public_tenant',
-    allowed_roles   TEXT[] NOT NULL DEFAULT '{}',
-    source_file     TEXT NOT NULL,
-    classified_at   TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    content_tsv     tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
-);
-CREATE INDEX IF NOT EXISTS private_document_chunks_embedding_idx
-    ON private_document_chunks USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX IF NOT EXISTS private_document_chunks_tenant_idx
-    ON private_document_chunks(tenant_id, sensitivity);
-CREATE INDEX IF NOT EXISTS private_document_chunks_tsv_idx
-    ON private_document_chunks USING GIN (content_tsv);
-
-ALTER TABLE private_document_chunks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE private_document_chunks FORCE  ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON private_document_chunks FOR ALL
-    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
-
--- Demo document uploads for sensitivity scanning demonstration.
--- Content stored as text in DB (demo only — not for production file storage).
-CREATE TABLE IF NOT EXISTS demo_documents (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id        UUID NOT NULL REFERENCES tenants(id),
-    uploaded_by      TEXT NOT NULL,
-    filename         TEXT NOT NULL,
-    content_text     TEXT NOT NULL,
-    file_size_bytes  INT,
-    sensitivity_scan JSONB NOT NULL DEFAULT '{}',
-    is_sensitive     BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    is_demo          BOOLEAN NOT NULL DEFAULT TRUE
-);
-
-CREATE INDEX IF NOT EXISTS demo_documents_tenant_idx
-    ON demo_documents(tenant_id, created_at DESC);
-
-ALTER TABLE demo_documents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE demo_documents FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_isolation ON demo_documents;
-CREATE POLICY tenant_isolation ON demo_documents FOR ALL
-    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON demo_documents TO fotopia_app;
-
--- Email agent rate-limit table.
--- Tracks inbound email volume per sender. Loop detection fires before this is touched.
-CREATE TABLE IF NOT EXISTS email_agent_rate_limit (
-    id              BIGSERIAL PRIMARY KEY,
-    tenant_id       UUID NOT NULL REFERENCES tenants(id),
-    sender_email    TEXT NOT NULL,
-    window_start    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    request_count   INT NOT NULL DEFAULT 1,
-    blocked_until   TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, sender_email)
-);
-
-CREATE INDEX IF NOT EXISTS idx_earl_tenant_sender
-    ON email_agent_rate_limit(tenant_id, sender_email);
-
-GRANT SELECT, INSERT, UPDATE ON email_agent_rate_limit TO fotopia_app;
-GRANT USAGE, SELECT ON SEQUENCE email_agent_rate_limit_id_seq TO fotopia_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO fotopia_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO fotopia_app;
