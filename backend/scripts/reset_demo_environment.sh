@@ -67,14 +67,29 @@ for migration in backend/db/migrations/*.sql; do
         || echo "  ~ $name (skipped or already applied)"
 done
 
-# ── Step 2: Clear Odoo leave/allocation records and reseed allocations ─────────
-echo ""
-echo "=== Step 2/5: Clear Odoo demo data and reseed allocations ==="
-docker exec fotopia-hr-agent-backend-1 python /app/scripts/clear_odoo_demo_data.py
+# ── Post-migration data: set notification_email routing ───────────────────────
+# Migration 016 adds the column but not the data. Set it here so approval emails
+# route correctly: all employees → shared fotoagent inbox; dev accounts → real inboxes.
+echo "=== Post-migration: set notification_email routing ==="
+docker exec fotopia-hr-agent-db-1 psql -U fotopia -d fotopia_hr -c "
+UPDATE employees
+SET notification_email = 'fotoagent@fotopiatech.com'
+WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'fotopia');
+UPDATE employees SET notification_email = 'i-youssef.abdelmoneim@fotopiatech.com'
+WHERE employee_code = 'FT-2022-010' AND tenant_id = (SELECT id FROM tenants WHERE slug = 'fotopia');
+UPDATE employees SET notification_email = 'i-saif.ahmed@fotopiatech.com'
+WHERE employee_code = 'FT-2022-011' AND tenant_id = (SELECT id FROM tenants WHERE slug = 'fotopia');
+" > /dev/null && echo "  ✓ notification_email routing set"
 
-# ── Step 3: Sync employees to Odoo ────────────────────────────────────────────
-echo "=== Step 3/5: Sync employees to Odoo ==="
+# ── Step 2: Sync employees to Odoo (must run BEFORE allocation reseed) ────────
+echo "=== Step 2/5: Sync employees to Odoo ==="
 docker exec fotopia-hr-agent-backend-1 python /app/scripts/sync_employees_to_odoo.py
+
+# ── Step 3: Clear Odoo leave/allocation records and reseed allocations ─────────
+# Runs after Step 2 so every DB employee already exists in Odoo before allocations are created.
+echo ""
+echo "=== Step 3/5: Clear Odoo demo data and reseed allocations ==="
+docker exec fotopia-hr-agent-backend-1 python /app/scripts/clear_odoo_demo_data.py
 
 # ── Step 4: Clear email rate limit (idempotent) ───────────────────────────────
 echo ""
