@@ -594,8 +594,8 @@ def _handle_leave_request(
     error_msg = tool_result.error or "Unknown error"
     if any(w in error_msg.lower() for w in ("weekend", "working day", "saturday", "sunday")):
         explanation = (
-            "The dates you requested fall on a weekend. "
-            "Please select working days (Monday through Friday)."
+            "The dates you requested fall entirely on a weekend or public holiday. "
+            "Please select working days."
         )
     elif any(w in error_msg.lower() for w in ("balance", "insufficient", "remaining")):
         explanation = f"You do not have sufficient leave balance for this request. {error_msg}"

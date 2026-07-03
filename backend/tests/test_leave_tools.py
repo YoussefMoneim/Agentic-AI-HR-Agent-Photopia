@@ -19,7 +19,7 @@ Annual leave policy: 90-day probation restriction, 2-day minimum advance notice.
 WFH policy: max 2 days/week, max 8 days/month.
 """
 
-import pytest
+from datetime import date, timedelta
 
 from tests.conftest import get_pending_days, get_used_days
 from tools.leave import (
@@ -60,7 +60,8 @@ WFH_WEEK4_START = "2026-08-24"
 WFH_WEEK4_END   = "2026-08-25"
 WFH_MONTH_9TH   = "2026-08-31"  # Monday of week 5 – triggers monthly limit (8 → 9)
 
-TOMORROW        = "2026-06-22"  # 1 day notice (annual needs 2) → blocked
+TODAY           = date.today().isoformat()                        # 0 days notice → blocked (annual needs 24h)
+TOMORROW        = (date.today() + timedelta(days=1)).isoformat()  # 24h notice — satisfies annual's minimum
 YESTERDAY       = "2026-06-20"  # past date
 
 
@@ -138,10 +139,10 @@ class TestCheckLeaveEligibility:
         assert "insufficient balance" in result.data["reason"].lower()
 
     def test_annual_blocked_min_notice_too_short(self, ctx, ds):
-        """Annual leave requires 2-day advance notice; tomorrow (1 day away) is blocked."""
+        """Annual leave (<=3 days) requires 24h advance notice; requesting for today (0 days away) is blocked."""
         tool = CheckLeaveEligibilityTool(ds)
         result = tool.execute(
-            {"leave_type_code": "annual", "start_date": TOMORROW, "end_date": TOMORROW},
+            {"leave_type_code": "annual", "start_date": TODAY, "end_date": TODAY},
             ctx(),
         )
         assert result.success
@@ -158,8 +159,8 @@ class TestCheckLeaveEligibility:
             {
                 "employee_code": new_emp,
                 "leave_type_code": "annual",
-                "start_date": "2026-07-01",
-                "end_date": "2026-07-01",
+                "start_date": TOMORROW,
+                "end_date": TOMORROW,
             },
             mgr_ctx,
         )
@@ -631,6 +632,27 @@ class TestEdgeCases:
         assert result.success
         assert result.data["days_requested"] == 1.0
 
+    def test_leave_spanning_friday_excludes_egypt_weekend_day(self, ctx, ds):
+        """Egypt's weekend is Friday+Saturday, not Saturday+Sunday.
+        Aug 19-21, 2026 is Wed-Thu-Fri: only Wed+Thu are working days, so the
+        request should charge 2 days, not 3."""
+        result = SubmitLeaveRequestTool(ds).execute(
+            {"leave_type_code": "annual", "start_date": "2026-08-19", "end_date": "2026-08-21"},
+            ctx(),
+        )
+        assert result.success
+        assert result.data["days_requested"] == 2.0
+
+    def test_leave_on_sunday_is_charged_as_a_working_day(self, ctx, ds):
+        """Sunday is a working day in Egypt (weekend is Fri/Sat) — a single-Sunday
+        request must charge 1 day, not be rejected as an all-weekend range."""
+        result = SubmitLeaveRequestTool(ds).execute(
+            {"leave_type_code": "annual", "start_date": "2026-08-23", "end_date": "2026-08-23"},
+            ctx(),
+        )
+        assert result.success
+        assert result.data["days_requested"] == 1.0
+
     def test_very_long_leave_blocked_by_balance(self, ctx, ds):
         """Requesting 100 annual days (balance = 21) is blocked by eligibility check inside submit.
         Start date must be >7 working days away (annual leave notice rule) so the balance check fires."""
@@ -641,23 +663,26 @@ class TestEdgeCases:
         assert not result.success
         assert "balance" in result.error.lower() or "insufficient" in result.error.lower()
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason="Past date blocking not implemented — all leave types currently allow past start_date. Phase 2 TODO.",
-    )
-    def test_sick_leave_in_the_past_should_be_blocked(self, ctx, ds):
-        """
-        Sick leave for yesterday should be blocked (no min_notice for sick).
-        Currently the code does NOT block past dates — this test documents the gap.
-        Phase 2 should add a universal 'start_date >= today' guard.
-        """
+    def test_annual_leave_in_the_past_is_blocked(self, ctx, ds):
+        """Annual leave requires advance planning — a past start_date must be blocked."""
+        result = CheckLeaveEligibilityTool(ds).execute(
+            {"leave_type_code": "annual", "start_date": YESTERDAY, "end_date": YESTERDAY},
+            ctx(),
+        )
+        assert result.success
+        assert result.data["eligible"] is False
+        assert "start date" in result.data["reason"].lower()
+
+    def test_sick_leave_in_the_past_is_allowed(self, ctx, ds):
+        """Sick leave is inherently after-the-fact (you're out sick, then file once
+        back at work, often with a certificate) — a past start_date must NOT be
+        blocked for reactive leave types."""
         result = CheckLeaveEligibilityTool(ds).execute(
             {"leave_type_code": "sick", "start_date": YESTERDAY, "end_date": YESTERDAY},
             ctx(),
         )
         assert result.success
-        # Phase 2 expectation: eligible=False. Current behavior: eligible=True (no past-date guard).
-        assert result.data["eligible"] is False
+        assert result.data["eligible"] is True
 
     def test_employee_sees_only_own_requests(self, ctx, ds):
         """After submitting as EMP001, get_leave_requests as EMP001 returns exactly that request."""
@@ -848,7 +873,7 @@ class TestCheckRequestCompleteness:
         )
         assert result.data["complete"] is True
         assert len(result.data["warnings"]) == 1
-        assert "medical certificate" in result.data["warnings"][0].lower()
+        assert "medical report" in result.data["warnings"][0].lower()
 
     # ── invalid leave type ────────────────────────────────────────────────────
 

@@ -42,6 +42,14 @@ FUNERAL_END_3   = "2026-06-30"   # 3 calendar days (max for 1st degree)
 FUNERAL_END_4   = "2026-07-01"   # 4 calendar days (exceeds 1st-degree max)
 FUNERAL_END_2   = "2026-06-29"   # 2 calendar days (exceeds 2nd-degree max of 1)
 
+# Paternity isn't exempt from the retroactive-date block (it's a plannable-enough
+# leave type per WIN policy), so — unlike funeral — its dates must stay in the
+# future. Computed relative to today rather than hardcoded to avoid drifting
+# into the past as real time passes.
+PATERNITY_START = (date.today() + timedelta(days=30)).isoformat()
+PATERNITY_END_1 = PATERNITY_START                                   # 1 calendar day
+PATERNITY_END_2 = (date.today() + timedelta(days=31)).isoformat()   # 2 calendar days
+
 def _working_days_from_today(n: int) -> str:
     d = date.today()
     count = 0
@@ -395,8 +403,8 @@ class TestCareerUsageCap:
         tool = CheckLeaveEligibilityTool(ds)
         result = tool.execute({
             "leave_type_code": "paternity",
-            "start_date": FUNERAL_START,
-            "end_date": FUNERAL_END_2,   # 2 days > max_consecutive_days=1
+            "start_date": PATERNITY_START,
+            "end_date": PATERNITY_END_2,   # 2 days > max_consecutive_days=1
         }, ctx())
         assert result.success
         assert result.data["eligible"] is False
@@ -407,8 +415,8 @@ class TestCareerUsageCap:
         tool = CheckLeaveEligibilityTool(ds)
         result = tool.execute({
             "leave_type_code": "paternity",
-            "start_date": FUNERAL_START,
-            "end_date": FUNERAL_END_1,  # 1 day
+            "start_date": PATERNITY_START,
+            "end_date": PATERNITY_END_1,  # 1 day
         }, ctx())
         assert result.success
         assert result.data["eligible"] is True
@@ -423,8 +431,8 @@ class TestCareerUsageCap:
         tool = CheckLeaveEligibilityTool(ds)
         result = tool.execute({
             "leave_type_code": "paternity",
-            "start_date": FUNERAL_START,
-            "end_date": FUNERAL_END_1,
+            "start_date": PATERNITY_START,
+            "end_date": PATERNITY_END_1,
         }, ctx())
         assert result.success
         assert result.data["eligible"] is False

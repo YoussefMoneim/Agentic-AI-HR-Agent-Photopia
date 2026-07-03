@@ -9,3 +9,5 @@ backend/documents/*.pdf
 node_modules/
 frontend/dist/
 .DS_Store
+Agentic-AI-HR-Agent-Photopia/
+backend/scripts/Bash tool output*

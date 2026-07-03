@@ -160,33 +160,35 @@ SELECT id, 'unpaid', 'Unpaid Leave', 'إجازة بدون مرتب', TRUE, FALSE
 FROM tenants WHERE slug = 'fotopia';
 
 -- Marriage: 5 days paid, once per service life, 1+ year service required
-INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
-SELECT id, 'marriage', 'Marriage Leave', 'إجازة زواج', TRUE, TRUE, FALSE, FALSE, TRUE, 5, 5
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'marriage', 'Marriage Leave', 'إجازة زواج', TRUE, TRUE, FALSE, FALSE, TRUE, 5, 5, 1, 365
 FROM tenants WHERE slug = 'fotopia';
 
 -- Hajj: up to 30 days, 5+ years service, once per service life
-INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
-SELECT id, 'hajj', 'Hajj Leave', 'إجازة حج', TRUE, TRUE, FALSE, FALSE, TRUE, 30, 30
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'hajj', 'Hajj Leave', 'إجازة حج', TRUE, TRUE, FALSE, FALSE, TRUE, 30, 30, 1, 1825
 FROM tenants WHERE slug = 'fotopia';
 
 -- Umrah: 5 days paid, once per service life, 1+ year service required
-INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
-SELECT id, 'umrah', 'Umrah Leave', 'إجازة عمرة', TRUE, TRUE, FALSE, FALSE, TRUE, 5, 5
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'umrah', 'Umrah Leave', 'إجازة عمرة', TRUE, TRUE, FALSE, FALSE, TRUE, 5, 5, 1, 365
 FROM tenants WHERE slug = 'fotopia';
 
 -- Funeral/Bereavement: 3 days 1st-degree relatives, 1 day 2nd-degree (enforced in tool logic)
+-- NOTE: this generic type is deactivated by migration 011 in favor of
+-- funeral_1st_degree / funeral_2nd_degree — kept here only for historical rows.
 INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
 SELECT id, 'funeral', 'Funeral/Bereavement Leave', 'إجازة وفاة', TRUE, FALSE, FALSE, FALSE, TRUE, 3, 3
 FROM tenants WHERE slug = 'fotopia';
 
 -- Maternity: 4 months (120 days) full pay, 1+ year service, max 3 times during service
-INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
-SELECT id, 'maternity', 'Maternity Leave', 'إجازة أمومة', TRUE, TRUE, FALSE, FALSE, TRUE, 120, 120
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'maternity', 'Maternity Leave', 'إجازة أمومة', TRUE, TRUE, FALSE, FALSE, TRUE, 120, 120, 3, 365
 FROM tenants WHERE slug = 'fotopia';
 
 -- Paternity: 1 day on delivery surgery day only, max 3 times during service
-INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days)
-SELECT id, 'paternity', 'Paternity Leave', 'إجازة أبوة', TRUE, TRUE, FALSE, FALSE, TRUE, 1, 1
+INSERT INTO leave_types (tenant_id, code, name_en, name_ar, requires_approval, requires_documentation, deducts_balance, is_time_based, requires_hr_review, max_days_per_year, max_consecutive_days, max_times_in_career, service_min_days)
+SELECT id, 'paternity', 'Paternity Leave', 'إجازة أبوة', TRUE, TRUE, FALSE, FALSE, TRUE, 1, 1, 3, 0
 FROM tenants WHERE slug = 'fotopia';
 
 -- Educational: restricted to exam days only, schedule must be shared with HR in advance

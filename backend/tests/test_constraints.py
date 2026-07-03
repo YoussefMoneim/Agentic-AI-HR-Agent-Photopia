@@ -234,8 +234,8 @@ class TestAdvisoryFlags:
         self, registry, ctx, db_conn, tenant_id
     ):
         """Rejecting long sick leave (> 3 days) without cert → success with advisory_flags."""
-        # 5-day sick leave, no medical certificate (default FALSE)
-        submit = _submit_sick_leave(registry, ctx, "2026-08-04", "2026-08-08", 5)
+        # Sun-Thu (Egypt work week) = 5 working days, no medical certificate (default FALSE)
+        submit = _submit_sick_leave(registry, ctx, "2026-08-02", "2026-08-08", 5)
         assert submit.success
         lr_id = submit.data["request_id"]
 
@@ -255,7 +255,7 @@ class TestAdvisoryFlags:
         self, registry, ctx, db_conn, tenant_id
     ):
         """advisory_shown workflow_events row must be written before the state change."""
-        submit = _submit_sick_leave(registry, ctx, "2026-08-04", "2026-08-08", 5)
+        submit = _submit_sick_leave(registry, ctx, "2026-08-02", "2026-08-08", 5)
         assert submit.success
         lr_id = submit.data["request_id"]
 
@@ -426,30 +426,32 @@ class TestEmailLinkConstraint:
 class TestWorkingDayCalculation:
     """
     Tests for count_working_days() utility and submission-time weekend validation.
-    Monday–Friday are working days; Saturday (5) and Sunday (6) are excluded.
+    Egypt's work week is Sunday–Thursday; Friday (4) and Saturday (5) are the
+    weekend and are excluded (config.EGYPT_WEEKEND_DAYS).
     """
 
-    def test_working_day_calculation_monday_to_friday(self):
-        """Mon–Fri inclusive = 5 working days."""
+    def test_working_day_calculation_sunday_to_thursday(self):
+        """Sun–Thu inclusive = 5 working days (Egypt work week)."""
         from datetime import date as d
         from workflow.constraints import count_working_days
-        assert count_working_days(d(2026, 7, 13), d(2026, 7, 17)) == 5  # Mon–Fri
+        # July 12 2026 = Sunday, July 16 = Thursday
+        assert count_working_days(d(2026, 7, 12), d(2026, 7, 16)) == 5  # Sun–Thu
 
     def test_request_spanning_weekend_counts_correctly(self):
-        """Fri to Wed spans a weekend: Fri + Mon + Tue + Wed = 4, not 6 calendar days."""
+        """Fri to Wed spans the Egypt weekend: Sun + Mon + Tue + Wed = 4, not 6 calendar days."""
         from datetime import date as d
         from workflow.constraints import count_working_days
-        # July 17 = Friday, July 18–19 = weekend, July 20–22 = Mon–Wed
+        # July 17 = Friday, July 17-18 = weekend (Fri+Sat), July 19-22 = Sun-Wed
         assert count_working_days(d(2026, 7, 17), d(2026, 7, 22)) == 4
 
     def test_weekend_only_request_blocked(self, registry, ctx):
-        """Submitting leave for Sat–Sun must be rejected with a working-days error."""
+        """Submitting leave for Fri–Sat (Egypt weekend) must be rejected with a working-days error."""
         result = registry.execute(
             "submit_leave_request",
             {
                 "leave_type_code": "sick",
-                "start_date": "2026-07-18",  # Saturday
-                "end_date": "2026-07-19",    # Sunday
+                "start_date": "2026-07-17",  # Friday
+                "end_date": "2026-07-18",    # Saturday
                 "reason": "not feeling well",
             },
             ctx(role="employee", employee_code="EMP001"),

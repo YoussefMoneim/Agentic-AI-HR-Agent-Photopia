@@ -12,18 +12,23 @@ An enterprise SaaS AI agent platform that automates HR tasks for Fotopia Technol
 
 ## 2. Current status
 
-**Phase 0 — Done.** Repo structure, Docker (Postgres + FastAPI), LLM abstraction (Claude + Grok), data abstraction (mock/Postgres), `ToolRegistry` gateway, `ToolContext`, `audit_log` table.
+**Phase 0 — Done.** Repo structure, Docker (Postgres + FastAPI), LLM abstraction (Claude + Grok), data abstraction (`PostgreSQLDataSource`), `ToolRegistry` gateway, `ToolContext`, `audit_log` table.
 
-**Phase 1 — Done.** 10 tools registered and tested:
+**Phase 1 — Done.** 10 employee/document tools registered and tested:
 - `get_employee_data`, `search_employees`, `list_employees`, `get_leave_balance` (read)
 - `get_employee_summary` (read, computes `years_of_service`)
 - `get_employee_documents` / `get_employee_document_history` (read, queries audit_log)
 - `generate_salary_certificate`, `generate_twimc_letter`, `generate_experience_certificate` (document generation — fpdf, ref codes SC-/TW-/EC-)
 - `calculate_end_of_service` (deterministic Egyptian Labor Law gratuity calc, returns `calculation_breakdown`)
 
-**Phase 1.5 — Next.** Hardening before more tools get added (see Section 7, Phase 1.5).
+**Phase 1.5 — Done.** RLS `ENABLE` + `FORCE` on every tenant table, with a CI guardrail test (`backend/tests/test_security.py::TestRLSEnforced`, plus a cross-tenant zero-rows test). `MockDataSource` renamed to `PostgreSQLDataSource` (`backend/data/postgresql.py`, wired via `backend/data/factory.py`).
 
-**Phase 2+ — Onboarding + security hardening.** See Section 7.
+**Phase 2 — Partially done:**
+- ✓ Real JWT authentication (`backend/core/auth.py::decode_context`) replaces the `build_context()` stub. A `DEBUG_ALLOW_DEMO_ROLE` fallback still exists for local development but a startup assertion in `config.py` refuses it outside `APP_ENV in (local, dev)`.
+- ✓ **Full leave-management feature**, well beyond the original Phase 1 scope: submit → eligibility → approve/reject → cancel lifecycle, cancellation-of-already-approved-leave, a team leave calendar, the full WIN Holding Leave Policy engine (`HR/BTE 001/7-2025` — 17 leave types, notice periods, service minimums, career usage caps, carry-over expiry, casual sub-quota, 25% department concurrent cap), a deterministic constraint engine (hard/soft/advisory rules, `backend/workflow/constraints.py`), a document-sensitivity appropriateness layer (`backend/workflow/appropriateness.py`), a bidirectional email approval agent (SMTP send + IMAP reply parsing, correlation tokens, rate limiting), and one-way Odoo sync for approved/cancelled leave. Covered by ~283 passing tests.
+- 🔲 Still open: Redis session history (still an in-memory `_sessions` dict), onboarding document-gen tools, ZDR agreement with Anthropic.
+
+**Phase 3+ — Not started.** RAG/knowledge layer, audit log hash-chaining/WORM, field-level encryption, onboarding state-machine writes. See Section 7.
 
 ---
 
@@ -33,11 +38,15 @@ Layers 1-6 and 9 exist today (in some form). Layers 7-8 and the parallel/future 
 
 ```
 1. PRESENTATION
-   React/Next.js — search, chat, document preview, (future: approval inbox)
+   React + Vite (not Next.js) — chat, approval inbox, team leave calendar,
+   document library, and audit log view are already built
+   (frontend/src/components/: ChatInterface, ApprovalInbox, LeaveCalendar,
+   DocumentLibrary, AuditLog).
 
-2. API / IDENTITY LAYER                                    [EXISTS — stubbed]
-   FastAPI. build_context() returns a stubbed HR-manager ToolContext today.
-   Phase 2 replaces this ONE function with JWT validation. Nothing else changes.
+2. API / IDENTITY LAYER                                    [EXISTS — real JWT]
+   FastAPI. _build_context() validates a real JWT (core/auth.py::decode_context)
+   today. A DEBUG_ALLOW_DEMO_ROLE fallback exists for local dev only — a
+   startup assertion in config.py refuses it outside APP_ENV in (local, dev).
    ToolContext = {tenant_id, user_id, role, employee_code}
 
 3. ORCHESTRATOR LAYER                                       [EXISTS]
@@ -62,22 +71,29 @@ Layers 1-6 and 9 exist today (in some form). Layers 7-8 and the parallel/future 
                    templates, DB-driven content, LLM never invents content
                    or does math)
    CALCULATION   — end-of-service gratuity (pure Python, never the LLM)
+   LEAVE (HITL)  — full lifecycle built and tested: submit/eligibility/
+                   approve/reject/cancel, cancellation-of-approved-leave,
+                   team calendar, WIN Holding policy engine, deterministic
+                   constraint engine (hard/soft/advisory), email + Odoo
+                   sync — see backend/tools/leave.py, backend/workflow/.
    WRITE (HITL)  — FUTURE: create_employee_record, enroll_social_insurance
                    — MUST require human approval, see Section 6
    COMMUNICATION — FUTURE: notify_finance, send_welcome_email — draft-only
                    by default, see Section 6
    ORCHESTRATION — FUTURE: onboarding checklist/status tools
 
-   Row-level access (_can_access_employee: HR sees all, employee sees only
-   self) enforced inside tools via ToolContext today. Mirrored by database
-   RLS once Phase 1.5 lands (defense in depth — both layers check).
+   Row-level access (core/access.py::can_access — HR sees all, employee sees
+   only self) enforced inside tools via ToolContext, AND mirrored by database
+   RLS with FORCE (Phase 1.5 — done, defense in depth — both layers check).
 
-6. DATA LAYER — PostgreSQL                                  [EXISTS, needs RLS]
-   tenant_id on every table, every query. DataSource abstraction
-   (mock.py reads Postgres today; odoo.py later, same interface).
-   NOTE: "MockDataSource" is a misnomer — it hits a real PostgreSQL DB.
-   Rename to PostgreSQLDataSource in Phase 1.5 cleanup.
-   FUTURE: RLS with FORCE, per-tenant database option for premium clients,
+6. DATA LAYER — PostgreSQL                                  [EXISTS — RLS FORCED]
+   tenant_id on every table, every query. DataSource abstraction:
+   PostgreSQLDataSource (backend/data/postgresql.py) is the real
+   implementation, wired via backend/data/factory.py; odoo_sync.py
+   syncs approved/cancelled leave one-way to Odoo.
+   RLS ENABLE + FORCE on every tenant table (migration 001_add_rls.sql),
+   with a CI guardrail test (test_security.py::TestRLSEnforced).
+   FUTURE: per-tenant database option for premium clients,
    field-level encryption for national_id/salary (blind index pattern).
 
 7. KNOWLEDGE / RAG LAYER                                    [NOT BUILT — Phase 3]
@@ -108,11 +124,14 @@ Layers 1-6 and 9 exist today (in some form). Layers 7-8 and the parallel/future 
    mirror to append-only/WORM storage, redact/tokenize PII before write.
 
 
-PARALLEL — STATEFUL WORKFLOW LAYER                          [NOT BUILT — Phase 2/3]
-   New tables: onboarding_cases, onboarding_tasks, pending_actions,
-   onboarding_documents (all tenant_id-scoped). Tracks multi-day processes
-   that pause for human approval between tool calls. The LangGraph state
-   machine (layer 3) reads/writes these.
+PARALLEL — STATEFUL WORKFLOW LAYER                          [PARTIALLY BUILT]
+   workflow_instances, pending_actions, workflow_events already exist
+   (tenant_id-scoped) and are in production use today for the leave-approval
+   HITL flow (backend/workflow/). NOT YET BUILT: onboarding_cases,
+   onboarding_tasks, onboarding_documents — the onboarding-specific state
+   machine (Phase 2/3) can reuse the existing pending_actions primitive
+   rather than building a new one from scratch. The LangGraph state machine
+   (layer 3) for multi-day onboarding workflows is still not built.
 
 
 FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Phase 4]
@@ -181,13 +200,15 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 |---|---|
 | **0** ✓ | Repo, abstractions, ToolRegistry, ToolContext, audit_log, Docker |
 | **1** ✓ | 10 tools: salary cert, TWIMC, experience cert, leave balance, employee summary, list/search employees, document history, EOS calculation |
-| **1.5** 🔲 next | CI guardrail: automated test asserting RLS is enabled+forced on every `tenant_id` table, plus a cross-tenant/cross-role query test expecting zero rows. Rename MockDataSource → PostgreSQLDataSource. Move session history note to Phase 2 Redis item. Add this BEFORE more tools, not after. |
-| **2** 🔲 | JWT auth (replaces `build_context()` stub) — prerequisite for all privileged writes |
-| **2** 🔲 | RLS enabled with FORCE + role/field RESTRICTIVE policies (Tier 3) |
-| **2** 🔲 | Redis for session history (replaces in-memory _sessions dict) |
+| **1.5** ✓ | CI guardrail: `test_security.py::TestRLSEnforced` asserts RLS is enabled+forced on every `tenant_id` table, plus a cross-tenant query test expecting zero rows. `MockDataSource` renamed to `PostgreSQLDataSource`. |
+| **2** ✓ | JWT auth (`core/auth.py::decode_context`, replaces `build_context()` stub) — prerequisite for all privileged writes. `DEBUG_ALLOW_DEMO_ROLE` remains as a dev-only fallback, locked to `APP_ENV in (local, dev)` |
+| **2** ✓ | RLS enabled with FORCE on all tenant tables |
+| **2** ✓ | Full leave-management lifecycle: submit/eligibility/approve/reject/cancel, cancellation-of-approved-leave, team calendar, WIN Holding Leave Policy engine (17 types), constraint engine (hard/soft/advisory), appropriateness layer, bidirectional email approval agent, Odoo sync. ~283 passing tests |
+| **2** 🔲 next | Redis for session history (replaces in-memory _sessions dict) |
 | **2** 🔲 | Onboarding Phase 1: document-gen tools only (offer letter, bilingual employment contract, NDA, checklist) — no writes yet |
+| **2** 🔲 | Role/field RESTRICTIVE policies (Tier 3) — RLS today is tenant-scoped only, not yet role/field-scoped at the DB layer |
 | **2** 🔲 | ZDR agreement with Anthropic — pursue in parallel with open item #1 below |
-| **3** 🔲 | Onboarding Phase 2: `onboarding_cases` state machine + `pending_actions` approval queue + gated writes (Rule 12) |
+| **3** 🔲 | Onboarding Phase 2: `onboarding_cases` state machine + gated writes (Rule 12) — can reuse the existing `pending_actions` table already proven by the leave-approval flow |
 | **3** 🔲 | RAG/knowledge layer — pgvector, metadata pre-filter, Tier 1/2/3 separation (Rule 14) |
 | **3** 🔲 | Audit log hash-chaining + WORM mirror (Rule 8) |
 | **3** 🔲 | Field-level encryption for national_id, salary (blind index pattern, Section 5) |

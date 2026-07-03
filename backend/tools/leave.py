@@ -86,6 +86,11 @@ _LEAVE_FIELD_REQUIREMENTS: dict[str, dict] = {
                       "attachment_note": "Official military authority summons letter required."},
 }
 
+# Leave types that are inherently after-the-fact (the triggering event isn't
+# something an employee can schedule in advance) — exempt from the
+# retroactive-date block below. Everything else requires start_date >= today.
+_RETROACTIVE_ALLOWED_TYPES = {"sick", "emergency", "funeral_1st_degree", "funeral_2nd_degree"}
+
 
 # ─── Tool 0: check_request_completeness ──────────────────────────────────────
 
@@ -336,6 +341,24 @@ class CheckLeaveEligibilityTool(Tool):
             if end_date < start_date:
                 return ToolResult(success=False, error="end_date must be on or after start_date.")
             days_requested = _calendar_days(start_date, end_date)
+
+        # Retroactive date check — leave types that require advance planning
+        # cannot be submitted for a start_date in the past. Reactive/unplanned
+        # types (sick, emergency, funeral) are exempt — they're inherently
+        # filed after the triggering event.
+        if start_date and start_date < today and leave_type_code not in _RETROACTIVE_ALLOWED_TYPES:
+            return ToolResult(
+                success=True,
+                data={
+                    "eligible": False,
+                    "reason": (
+                        f"{leave_type['name_en']} requires a start date of today or later. "
+                        "Retroactive submission is only allowed for sick, emergency, and funeral leave."
+                    ),
+                    "leave_type_name": leave_type["name_en"],
+                },
+                action_type="data_read",
+            )
 
         # 1. Probation check
         probation_days = policy.get("probation_restriction_days", 0) or 0
@@ -743,7 +766,7 @@ class SubmitLeaveRequestTool(Tool):
             if days_requested == 0:
                 return ToolResult(
                     success=False,
-                    error="The requested dates fall entirely on weekends. Please select working days (Monday through Friday).",
+                    error="The requested dates fall entirely on weekends or public holidays. Please select working days.",
                 )
             if sd < _today():
                 retroactive_advisory = (
