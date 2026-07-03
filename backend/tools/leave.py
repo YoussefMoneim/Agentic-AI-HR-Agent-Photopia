@@ -1048,7 +1048,7 @@ class SubmitLeaveRequestTool(Tool):
     <td style="background-color:#0a0c1a;padding:20px 30px;text-align:center;border-radius:0 0 8px 8px">
       <p style="margin:0 0 6px 0;color:#aaaaaa;font-size:12px">
         Fotopia HR System &mdash; Automated message. Do not forward.
-        Questions: <a href="mailto:hr@fotopia.com" style="color:#c9a84c;text-decoration:none">hr@fotopia.com</a>
+        Questions: <a href="mailto:hr.agent.fotopia@gmail.com" style="color:#c9a84c;text-decoration:none">hr.agent.fotopia@gmail.com</a>
       </p>
       <p style="margin:0;color:#666666;font-size:11px">
         This email contains confidential HR information intended only for the named recipient.
@@ -1080,7 +1080,7 @@ class SubmitLeaveRequestTool(Tool):
             f"Or reply to this email with 'Approved' or 'Rejected'.\n"
             f"Reply-Token: {outbound_message_id}\n\n"
             f"---\n"
-            f"Fotopia HR System — Automated message. Questions: hr@fotopia.com\n"
+            f"Fotopia HR System — Automated message. Questions: hr.agent.fotopia@gmail.com\n"
             f"Confidential — intended only for the named recipient."
         )
         email_svc.send_email(

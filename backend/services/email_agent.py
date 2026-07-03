@@ -255,7 +255,7 @@ def _send_reply(
       <hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0">
       <p style="margin:0;font-size:11px;color:#aaa;text-align:center">
         Fotopia HR System &mdash; Automated reply. For assistance contact
-        <a href="mailto:hr@fotopia.com" style="color:#c9a84c">hr@fotopia.com</a>
+        <a href="mailto:hr.agent.fotopia@gmail.com" style="color:#c9a84c">hr.agent.fotopia@gmail.com</a>
       </p>
     </td>
   </tr>
@@ -337,7 +337,7 @@ def _handle_leave_balance(
         f"<p style='color:#444;font-size:14px'>Dear {name},</p>"
         f"<p style='color:#444;font-size:14px'>We were unable to retrieve your leave balance "
         f"at this time. Please contact HR at "
-        f"<a href='mailto:hr@fotopia.com' style='color:#c9a84c'>hr@fotopia.com</a>.</p>"
+        f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a>.</p>"
     )
     plain = f"Dear {name},\n\nUnable to retrieve your leave balance. Please contact HR directly."
     return "Leave Balance", "📊", "#2563eb", html, plain
@@ -447,11 +447,11 @@ def _handle_policy_question(
                 f"Source: {source}</p>"
                 f"<p style='color:#888;font-size:12px;margin-top:8px'>"
                 f"For further clarification, contact HR at "
-                f"<a href='mailto:hr@fotopia.com' style='color:#c9a84c'>hr@fotopia.com</a></p>"
+                f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a></p>"
             )
             plain = (
                 f"Dear {name},\n\nPolicy information:\n\n{content_text}\n\n"
-                f"Source: {source}\n\nFor further help contact hr@fotopia.com"
+                f"Source: {source}\n\nFor further help contact hr.agent.fotopia@gmail.com"
             )
             return "Policy Information", "📖", "#2563eb", html, plain
 
@@ -460,7 +460,7 @@ def _handle_policy_question(
         f"<p style='color:#444;font-size:14px'>"
         f"We couldn't find a specific policy section matching your question. "
         f"Please contact your HR Business Partner at "
-        f"<a href='mailto:hr@fotopia.com' style='color:#c9a84c'>hr@fotopia.com</a> "
+        f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a> "
         f"for clarification.</p>"
         f"<p style='color:#444;font-size:14px'>"
         f"Our system can answer questions about annual, sick, maternity/paternity, "
@@ -468,7 +468,7 @@ def _handle_policy_question(
     )
     plain = (
         f"Dear {name},\n\nWe couldn't find a specific answer to your policy question. "
-        f"Please contact hr@fotopia.com for clarification."
+        f"Please contact hr.agent.fotopia@gmail.com for clarification."
     )
     return "Policy Information", "📖", "#2563eb", html, plain
 
@@ -615,11 +615,11 @@ def _handle_leave_request(
         f"{explanation}</div>"
         f"<p style='color:#888;font-size:12px;margin-top:16px'>"
         f"Please log into the HR portal or contact HR at "
-        f"<a href='mailto:hr@fotopia.com' style='color:#c9a84c'>hr@fotopia.com</a></p>"
+        f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a></p>"
     )
     plain = (
         f"Dear {name},\n\nUnable to submit your leave request: {explanation}\n\n"
-        f"Please contact hr@fotopia.com"
+        f"Please contact hr.agent.fotopia@gmail.com"
     )
     return "Leave Request — Issue", "⚠️", "#dc2626", html, plain
 
@@ -639,12 +639,12 @@ def _handle_leave_cancellation(name: str) -> tuple[str, str, str, str, str]:
         f"</ul>"
         f"<p style='color:#888;font-size:12px;margin-top:16px'>"
         f"Questions? Contact HR at "
-        f"<a href='mailto:hr@fotopia.com' style='color:#c9a84c'>hr@fotopia.com</a></p>"
+        f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a></p>"
     )
     plain = (
         f"Dear {name},\n\nTo cancel a leave request, please log into the HR portal. "
         f"This ensures the correct request is cancelled and your balance is accurately restored.\n\n"
-        f"Contact hr@fotopia.com for assistance."
+        f"Contact hr.agent.fotopia@gmail.com for assistance."
     )
     return "Leave Cancellation", "📋", "#c9a84c", html, plain
 
@@ -667,7 +667,7 @@ def _handle_unknown(name: str) -> tuple[str, str, str, str, str]:
         f"</ul></div>"
         f"<p style='color:#888;font-size:12px;margin-top:16px'>"
         f"For other requests, contact HR at "
-        f"<a href='mailto:hr@fotopia.com' style='color:#c9a84c'>hr@fotopia.com</a></p>"
+        f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a></p>"
     )
     plain = (
         f"Dear {name},\n\nI can help with:\n"
@@ -675,7 +675,7 @@ def _handle_unknown(name: str) -> tuple[str, str, str, str, str]:
         f"- Submit leave: 'I want 3 days annual leave from 2026-07-21'\n"
         f"- Leave status: 'What is the status of my request?'\n"
         f"- Policy questions: 'How many sick days do I get?'\n\n"
-        f"For other requests contact hr@fotopia.com"
+        f"For other requests contact hr.agent.fotopia@gmail.com"
     )
     return "How Can I Help?", "💬", "#2563eb", html, plain
 
@@ -734,11 +734,11 @@ def process_employee_email(
             f"Please try again later.</p>"
             f"<p style='color:#888;font-size:12px'>"
             f"For urgent requests, contact HR directly at "
-            f"<a href='mailto:hr@fotopia.com' style='color:#c9a84c'>hr@fotopia.com</a></p>"
+            f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a></p>"
         )
         plain = (
             f"Dear {display_name},\n\nToo many requests in the last hour (max 5). "
-            f"Please try again later or contact hr@fotopia.com"
+            f"Please try again later or contact hr.agent.fotopia@gmail.com"
         )
         _send_reply(
             to_email=from_email,
