@@ -31,7 +31,7 @@ FROM fotopia, (VALUES
     ('FT-2022-007','Maryam Al Falasi',          'Senior Finance Analyst',          'Finance',         '2022-06-01', 24000, 'maryam.falasi@fotopiatech.com'),
     ('FT-2022-008','Rashed Al Blooshi',         'DevOps Lead',                     'Engineering',     '2022-07-15', 29000, 'rashed.blooshi@fotopiatech.com'),
     ('FT-2022-009','Fatima Al Suwaidi',         'Senior UI/UX Designer',           'Product',         '2022-02-20', 25000, 'fatima.suwaidi@fotopiatech.com'),
-    ('FT-2022-010','Saif Ahmed',                'Mobile Engineer',                 'Engineering',     '2022-11-01', 24000, 'saif.ahmed@fotopiatech.com'),
+    ('FT-2022-010','Youssef Abdelmoneim',       'Mobile Engineer',                 'Engineering',     '2022-11-01', 24000, 'i-youssef.abdelmoneim@fotopiatech.com'),
     ('FT-2022-011','Saif Al Ahmed',             'Mobile Engineer',                 'Engineering',     '2022-11-01', 24000, 'i-saif.ahmed@fotopiatech.com'),
     ('FT-2023-001','Layla Al Qassimi',          'Data Analyst',                    'Engineering',     '2023-01-15', 22000, 'layla.qassimi@fotopiatech.com'),
     ('FT-2023-002','Hamdan Al Nuaimi',          'Sales Executive',                 'Sales',           '2023-03-01', 19000, 'hamdan.nuaimi@fotopiatech.com'),
