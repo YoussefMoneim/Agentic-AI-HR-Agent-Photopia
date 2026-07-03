@@ -32,7 +32,7 @@ FROM fotopia, (VALUES
     ('FT-2022-008','Rashed Al Blooshi',         'DevOps Lead',                     'Engineering',     '2022-07-15', 29000, 'rashed.blooshi@fotopiatech.com'),
     ('FT-2022-009','Fatima Al Suwaidi',         'Senior UI/UX Designer',           'Product',         '2022-02-20', 25000, 'fatima.suwaidi@fotopiatech.com'),
     ('FT-2022-010','Youssef Abdelmoneim',       'Mobile Engineer',                 'Engineering',     '2022-11-01', 24000, 'i-youssef.abdelmoneim@fotopiatech.com'),
-    ('FT-2022-011','Saif Al Ahmed',             'Mobile Engineer',                 'Engineering',     '2022-11-01', 24000, 'i-saif.ahmed@fotopiatech.com'),
+    ('FT-2022-011','Saif Ahmed',                'Mobile Engineer',                 'Engineering',     '2022-11-01', 24000, 'i-saif.ahmed@fotopiatech.com'),
     ('FT-2023-001','Layla Al Qassimi',          'Data Analyst',                    'Engineering',     '2023-01-15', 22000, 'layla.qassimi@fotopiatech.com'),
     ('FT-2023-002','Hamdan Al Nuaimi',          'Sales Executive',                 'Sales',           '2023-03-01', 19000, 'hamdan.nuaimi@fotopiatech.com'),
     ('FT-2023-003','Shaikha Al Ketbi',          'Graphic Designer',                'Product',         '2023-04-10', 18000, 'shaikha.ketbi@fotopiatech.com'),
@@ -332,18 +332,3 @@ SELECT
 FROM employees e
 JOIN tenants t ON t.id = e.tenant_id
 WHERE t.slug = 'fotopia';
-
--- Developer login alias: Youssef can sign in as i-youssef.abdelmoneim@fotopiatech.com
--- (FT-2022-010's employee.email is saif.ahmed for the demo persona; this alias gives
--- the developer their own login without touching the Odoo sync key.)
-INSERT INTO users (tenant_id, email, full_name, role, employee_id, password_hash)
-SELECT
-    e.tenant_id,
-    'i-youssef.abdelmoneim@fotopiatech.com',
-    e.full_name,
-    'employee',
-    e.id,
-    '$2b$12$4qFSJ1YZ.CoCCX/TPUU2E.J/gcu4v5wiQz42fxPlwJCI6U7rxjfZO'
-FROM employees e
-JOIN tenants t ON t.id = e.tenant_id
-WHERE t.slug = 'fotopia' AND e.employee_code = 'FT-2022-010';
