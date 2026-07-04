@@ -479,11 +479,12 @@ export default function ApprovalInbox({ visible, onCountChange, role }) {
 
   useEffect(() => {
     if (!visible) return
+    if (role !== 'hr_manager' && role !== 'admin') return
     setLoading(true)
     load().finally(() => setLoading(false))
     intervalRef.current = setInterval(load, 15000)
     return () => clearInterval(intervalRef.current)
-  }, [visible, load])
+  }, [visible, role, load])
 
   function handleApproved(requestId) {
     setItems(prev => {
