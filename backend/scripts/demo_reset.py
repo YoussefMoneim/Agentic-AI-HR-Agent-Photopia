@@ -124,11 +124,15 @@ def reset_odoo():
             return
         models = xmlrpc.client.ServerProxy(f"{config.ODOO_URL}/xmlrpc/2/object")
 
-        # Find all leaves we synced (description contains our marker)
+        # Reactivate all demo employees (neutralized Odoo databases set active=False)
+        models.execute_kw(config.ODOO_DB, uid, config.ODOO_PASSWORD,
+            'hr.employee', 'write', [list(range(4693, 4719)), {'active': True}])
+
+        # Find all leaves for the demo employees
         leave_ids = models.execute_kw(
             config.ODOO_DB, uid, config.ODOO_PASSWORD,
-            "hr.leave", "search",
-            [[["name", "ilike", "Leave synced from Fotopia HR"]]],
+            'hr.leave', 'search',
+            [[['employee_id.id', 'in', list(range(4693, 4719))]]]
         )
         if not leave_ids:
             print("  No synced leaves found in Odoo — nothing to clean")
