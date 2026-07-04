@@ -10,7 +10,7 @@ from typing import Literal
 import psycopg2
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 import config
@@ -19,8 +19,8 @@ from audit.logger import AuditLogger
 from data.base import DataSource
 from data.factory import get_data_source
 from llm.factory import get_llm
-from services import email as email_svc
 from tools.base import ToolContext
+from tools.leave import send_leave_decision_email
 from tools.registry import ToolRegistry, build_registry
 from workflow.constraints import evaluate_constraints
 
@@ -394,22 +394,12 @@ def resolve_leave_request(
 
     employee_code = result.get("employee_code", "")
     days = result.get("days_requested", 0)
-    action_word = "approved ✅" if decision == "approved" else "rejected ❌"
 
-    # Send confirmation email to the employee
-    if employee_code and _data_source:
-        emp = _data_source.get_employee_by_code(_fotopia_tenant_id, employee_code)
-        if emp and emp.get("email"):
-            status_word = "approved" if decision == "approved" else "rejected"
-            email_svc.send_email(
-                to_email=emp.get("notification_email") or emp["email"],
-                subject=f"Leave Request {status_word.capitalize()} — {emp['full_name']}",
-                body_html=(
-                    f"<p>Your leave request ({days:.0f} days) has been "
-                    f"<strong>{status_word}</strong>.</p>"
-                ),
-                body_plain=f"Your leave request ({days:.0f} days) has been {status_word}.",
-            )
+    # Send confirmation email to the employee — branded template, shared with the
+    # chat-tool and email-reply resolution paths (tools.leave.send_leave_decision_email)
+    leave_request_id = result.get("leave_request_id")
+    if leave_request_id and _data_source:
+        send_leave_decision_email(_data_source, _fotopia_tenant_id, leave_request_id, decision)
 
     # Odoo sync for approved leaves — non-blocking
     if decision == "approved" and config.ODOO_ENABLED and _data_source:
@@ -659,6 +649,203 @@ def get_pending_cancellations_via_api(authorization: str | None = Header(default
     if not result.success:
         raise HTTPException(status_code=403, detail=result.error)
     return result.data
+
+
+@app.get("/api/leave/export/excel")
+def export_leave_excel(authorization: str | None = Header(default=None)):
+    """Export the leave register, balance summary, and monthly summary as an Excel workbook. HR-only."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    if ctx.role not in ("hr_manager", "admin"):
+        raise HTTPException(status_code=403, detail="HR manager or admin access required")
+
+    from datetime import date as _date
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    HEADER_FILL = PatternFill(start_color="0A0C1A", end_color="0A0C1A", fill_type="solid")
+    HEADER_FONT = Font(color="C9A84C", bold=True)
+    ALT_FILL = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")
+    RED_FONT = Font(color="DC2626")
+    ORANGE_FONT = Font(color="D97706")
+    year = _date.today().year
+
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET app.current_tenant_id = %s", (_fotopia_tenant_id,))
+
+            cur.execute(
+                """
+                SELECT e.employee_code, e.full_name, e.department, e.position,
+                       lt.name_en, lr.start_date, lr.end_date, lr.days_requested,
+                       lr.submitted_at, mgr.full_name, lr.status, lr.id
+                FROM leave_requests lr
+                JOIN employees e ON e.id = lr.employee_id
+                JOIN leave_types lt ON lt.id = lr.leave_type_id
+                LEFT JOIN employees mgr ON mgr.id = lr.manager_id
+                WHERE lr.tenant_id = %s
+                ORDER BY lr.submitted_at DESC
+                """,
+                (_fotopia_tenant_id,),
+            )
+            register_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT e.employee_code, e.full_name, e.department,
+                       lt.code, lb.allocated_days, lb.used_days, lb.pending_days
+                FROM leave_balances lb
+                JOIN employees e ON e.id = lb.employee_id
+                JOIN leave_types lt ON lt.id = lb.leave_type_id
+                WHERE lb.tenant_id = %s AND lb.year = %s
+                ORDER BY e.employee_code
+                """,
+                (_fotopia_tenant_id, year),
+            )
+            balance_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT e.department, EXTRACT(MONTH FROM lr.start_date)::int, lr.days_requested
+                FROM leave_requests lr
+                JOIN employees e ON e.id = lr.employee_id
+                WHERE lr.tenant_id = %s
+                  AND lr.status IN ('manager_approved', 'hr_approved')
+                  AND lr.start_date IS NOT NULL
+                  AND EXTRACT(YEAR FROM lr.start_date) = %s
+                  AND lr.days_requested IS NOT NULL
+                """,
+                (_fotopia_tenant_id, year),
+            )
+            monthly_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    wb = openpyxl.Workbook()
+
+    # ── Sheet 1: Leave Register ────────────────────────────────────────────
+    ws1 = wb.active
+    ws1.title = "Leave Register"
+    headers1 = ["Employee Code", "Full Name", "Department", "Position", "Leave Type",
+                "Start Date", "End Date", "Working Days", "Submitted Date",
+                "Approved By", "Status", "Request ID"]
+    ws1.append(headers1)
+    for cell in ws1[1]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+    ws1.freeze_panes = "A2"
+
+    for i, row in enumerate(register_rows, start=2):
+        (emp_code, full_name, dept, position, lt_name, start_date, end_date,
+         days_requested, submitted_at, approved_by, status, request_id) = row
+        # openpyxl rejects timezone-aware datetimes outright (TIMESTAMPTZ from psycopg2)
+        submitted_at = submitted_at.replace(tzinfo=None) if submitted_at else None
+        ws1.append([
+            emp_code, full_name, dept, position, lt_name,
+            start_date, end_date, float(days_requested) if days_requested is not None else None,
+            submitted_at, approved_by or "", status, str(request_id),
+        ])
+        if i % 2 == 0:
+            for cell in ws1[i]:
+                cell.fill = ALT_FILL
+        for col in (6, 7, 9):
+            ws1.cell(row=i, column=col).number_format = "DD/MM/YYYY"
+
+    for col_idx, header in enumerate(headers1, start=1):
+        ws1.column_dimensions[get_column_letter(col_idx)].width = max(14, len(header) + 2)
+
+    # ── Sheet 2: Balance Summary ────────────────────────────────────────────
+    ws2 = wb.create_sheet("Balance Summary")
+    headers2 = ["Employee Code", "Full Name", "Department", "Annual Entitlement",
+                "Annual Used", "Annual Pending", "Annual Remaining", "Sick Used", "WFH Used"]
+    ws2.append(headers2)
+    for cell in ws2[1]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+    ws2.freeze_panes = "A2"
+
+    by_employee: dict[str, dict] = {}
+    order: list[str] = []
+    for emp_code, full_name, dept, lt_code, allocated, used, pending in balance_rows:
+        if emp_code not in by_employee:
+            by_employee[emp_code] = {
+                "full_name": full_name, "department": dept,
+                "annual_entitlement": 0.0, "annual_used": 0.0, "annual_pending": 0.0,
+                "sick_used": 0.0, "wfh_used": 0.0,
+            }
+            order.append(emp_code)
+        rec = by_employee[emp_code]
+        allocated, used, pending = float(allocated or 0), float(used or 0), float(pending or 0)
+        if lt_code == "annual":
+            rec["annual_entitlement"], rec["annual_used"], rec["annual_pending"] = allocated, used, pending
+        elif lt_code == "sick":
+            rec["sick_used"] = used
+        elif lt_code == "wfh":
+            rec["wfh_used"] = used
+
+    row_i = 2
+    for emp_code in order:
+        rec = by_employee[emp_code]
+        remaining = rec["annual_entitlement"] - rec["annual_used"] - rec["annual_pending"]
+        ws2.append([
+            emp_code, rec["full_name"], rec["department"],
+            rec["annual_entitlement"], rec["annual_used"], rec["annual_pending"],
+            remaining, rec["sick_used"], rec["wfh_used"],
+        ])
+        if row_i % 2 == 0:
+            for cell in ws2[row_i]:
+                cell.fill = ALT_FILL
+        remaining_cell = ws2.cell(row=row_i, column=7)
+        if remaining < 5:
+            remaining_cell.font = RED_FONT
+        elif remaining < 10:
+            remaining_cell.font = ORANGE_FONT
+        row_i += 1
+
+    for col_idx, header in enumerate(headers2, start=1):
+        ws2.column_dimensions[get_column_letter(col_idx)].width = max(14, len(header) + 2)
+
+    # ── Sheet 3: Monthly Summary ────────────────────────────────────────────
+    ws3 = wb.create_sheet("Monthly Summary")
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    headers3 = ["Department"] + month_names + ["Total"]
+    ws3.append(headers3)
+    for cell in ws3[1]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+    ws3.freeze_panes = "A2"
+
+    dept_month_totals: dict[str, list] = {}
+    for dept, month, days in monthly_rows:
+        dept = dept or "Unassigned"
+        dept_month_totals.setdefault(dept, [0.0] * 12)
+        dept_month_totals[dept][int(month) - 1] += float(days or 0)
+
+    row_i = 2
+    for dept in sorted(dept_month_totals.keys()):
+        totals = dept_month_totals[dept]
+        ws3.append([dept] + totals + [sum(totals)])
+        if row_i % 2 == 0:
+            for cell in ws3[row_i]:
+                cell.fill = ALT_FILL
+        row_i += 1
+
+    for col_idx, header in enumerate(headers3, start=1):
+        ws3.column_dimensions[get_column_letter(col_idx)].width = max(10, len(header) + 2)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=WIN_Holding_Leave_Register_{_date.today()}.xlsx"},
+    )
 
 
 @app.get("/api/calendar/leave")

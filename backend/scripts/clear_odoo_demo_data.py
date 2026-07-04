@@ -1,6 +1,8 @@
 """
-clear_odoo_demo_data.py — Delete all Odoo hr.leave and hr.leave.allocation
-records for the 25 demo employees, then re-create the initial allocations.
+clear_odoo_demo_data.py — Delete all Odoo hr.leave records for the 25 demo
+employees. Allocations (hr.leave.allocation) are never touched — they
+represent annual entitlements, not individual leave requests, and must
+survive a demo reset.
 
 Run from inside the backend container:
   python /app/scripts/clear_odoo_demo_data.py
@@ -179,9 +181,13 @@ def main():
         print("  No employees found — run sync_employees_to_odoo.py first")
         return
 
+    # Reactivate all demo employees (handles neutralized Odoo databases)
+    print("Reactivating demo employees...")
+    models.execute_kw(config.ODOO_DB, uid, config.ODOO_PASSWORD, 'hr.employee', 'write',
+        [emp_ids, {'active': True}])
+    print(f"  Reactivated {len(emp_ids)} employees")
+
     _clear_model(uid, models, "hr.leave", emp_ids)
-    _clear_model(uid, models, "hr.leave.allocation", emp_ids)
-    _create_allocations(uid, models, employees)
 
     print("  ✓ Odoo demo data reset complete\n")
 

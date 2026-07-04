@@ -196,7 +196,7 @@ export default function App() {
           </div>
           {HR_ROLES.has(user.role) && (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'inbox' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'inbox' ? 'auto' : 'none' }}>
-              <ApprovalInbox visible={rightPanel === 'inbox'} onCountChange={setPendingCount} />
+              <ApprovalInbox visible={rightPanel === 'inbox'} onCountChange={setPendingCount} role={user.role} />
             </div>
           )}
         </div>

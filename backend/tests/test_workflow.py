@@ -16,6 +16,7 @@ Run inside Docker:
 
 import os
 import sys
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -126,9 +127,11 @@ class TestCorrelationTokenResume:
 
     def _submit_and_get_token(self, registry, ctx, database_url, tenant_id):
         emp_ctx = ctx(role="employee")
+        start = date.today() + timedelta(days=2)
+        end = start + timedelta(days=2)
         result = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-04", "end_date": "2026-07-06",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "token test"},
             emp_ctx,
         )

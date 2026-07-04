@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   approveLeaveCancellation, approveLeaveRequest, checkLeaveConstraints,
-  fetchPendingApprovals, getPendingCancellations, rejectLeaveRequest,
+  exportLeaveExcel, fetchPendingApprovals, getPendingCancellations, rejectLeaveRequest,
 } from '../api.js'
 
 function formatDate(str) {
@@ -430,12 +430,31 @@ function CancellationCard({ item, onApproved }) {
 
 // ── ApprovalInbox ─────────────────────────────────────────────────────────────
 
-export default function ApprovalInbox({ visible, onCountChange }) {
+export default function ApprovalInbox({ visible, onCountChange, role }) {
   const [items, setItems] = useState([])
   const [cancellations, setCancellations] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [exporting, setExporting] = useState(false)
   const intervalRef = useRef(null)
+
+  async function handleExportExcel() {
+    setExporting(true)
+    setError(null)
+    try {
+      const blob = await exportLeaveExcel()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `WIN_Holding_Leave_Register_${new Date().toISOString().split('T')[0]}.xlsx`
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -514,10 +533,25 @@ export default function ApprovalInbox({ visible, onCountChange }) {
               background: '#f59e0b', color: '#1a0e00', borderRadius: 10,
             }}>{totalCount}</span>
           )}
+          {(role === 'hr_manager' || role === 'admin') && (
+            <button
+              onClick={handleExportExcel}
+              disabled={exporting}
+              style={{
+                marginLeft: 'auto', padding: '3px 10px', borderRadius: 6,
+                background: 'transparent', border: '1px solid #c9a84c',
+                color: '#c9a84c', fontSize: 11, cursor: exporting ? 'default' : 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {exporting ? 'Exporting…' : '📥 Export Excel'}
+            </button>
+          )}
           <button
             onClick={() => { setLoading(true); load().finally(() => setLoading(false)) }}
             style={{
-              marginLeft: 'auto', padding: '3px 10px', borderRadius: 6,
+              marginLeft: (role === 'hr_manager' || role === 'admin') ? 0 : 'auto',
+              padding: '3px 10px', borderRadius: 6,
               background: 'transparent', border: '1px solid #252b42',
               color: '#6b7280', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
             }}

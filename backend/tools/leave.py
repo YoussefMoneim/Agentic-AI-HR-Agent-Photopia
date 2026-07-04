@@ -1243,6 +1243,319 @@ class GetPendingApprovalsTool(Tool):
         )
 
 
+def send_leave_decision_email(
+    ds: DataSource,
+    tenant_id: str,
+    leave_request_id: str,
+    decision: str,  # "approved" | "rejected"
+    resolved_by_employee_code: str | None = None,
+) -> None:
+    """Send the branded employee confirmation email for an approve/reject decision.
+    Shared by the chat-tool, email-link-click, and email-reply resolution paths so
+    all three produce an identical, on-brand notification instead of drifting apart
+    the way the email-link and email-reply paths previously did. Non-blocking."""
+    try:
+        lr = ds.get_leave_request_by_id(tenant_id, leave_request_id)
+        if not lr:
+            return
+        employee = ds.get_employee_by_code(tenant_id, lr["employee_code"])
+        if not employee or not employee.get("email"):
+            return
+
+        approver_code = resolved_by_employee_code or lr.get("manager_code")
+        approver = ds.get_employee_by_code(tenant_id, approver_code) if approver_code else None
+
+        emp_name = employee.get("full_name") or employee["email"]
+        mgr_name = approver.get("full_name", "Your manager") if approver else "HR"
+        leave_type = lr.get("leave_type_name", "")
+        start_date = str(lr.get("start_date", ""))
+        end_date = str(lr.get("end_date", ""))
+        days_n = lr.get("days_requested")
+        duration = (
+            f"{float(days_n):.0f} day{'s' if float(days_n) != 1 else ''}"
+            if days_n else f"{lr.get('duration_hours', '?')} hours"
+        )
+        is_approved = decision == "approved"
+
+        if is_approved:
+            by_row = (
+                '<tr>'
+                '<td style="padding:10px 14px;color:#666">Approved by</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e">{mgr_name}</td>'
+                '</tr>'
+            )
+            trailing_rows = by_row
+        else:
+            comment = lr.get("rejection_reason") or lr.get("manager_comment") or ""
+            safe_comment = sanitize_for_html_email(comment) if comment else ""
+            reason_row_html = (
+                '<tr style="background:#f8f8fb">'
+                '<td style="padding:10px 14px;color:#666">Reason</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e">{safe_comment}</td>'
+                '</tr>'
+            ) if safe_comment else ''
+            by_row = (
+                '<tr>'
+                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Rejected by</td>'
+                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{mgr_name}</td>'
+                '</tr>'
+            )
+            trailing_rows = by_row + reason_row_html
+
+        icon = "✅" if is_approved else "❌"
+        color = "#16a34a" if is_approved else "#dc2626"
+        status_label = "Approved" if is_approved else "Rejected"
+        verb = "approved" if is_approved else "rejected"
+
+        body_html = (
+            '<html><body style="font-family:Arial,sans-serif;background:#f4f4f7;margin:0;padding:20px">'
+            '<div style="max-width:480px;margin:0 auto">'
+            '<div style="background:#0a0c1a;padding:16px 24px;border-radius:8px 8px 0 0;text-align:center">'
+            '<div style="color:#fff;font-size:16px;font-weight:bold">Fotopia HR System</div>'
+            '<div style="color:#c9a84c;font-size:11px;margin-top:4px">WIN Holding Group</div>'
+            '</div>'
+            '<div style="background:#fff;padding:32px 28px;border-radius:0 0 8px 8px">'
+            f'<div style="font-size:36px;text-align:center;margin-bottom:16px;color:{color}">{icon}</div>'
+            f'<h2 style="margin:0 0 8px 0;color:{color};font-size:20px;text-align:center">Leave Request {status_label}</h2>'
+            f'<p style="margin:0 0 20px 0;color:#555;font-size:14px;line-height:1.6;text-align:center">'
+            f'Dear {emp_name}, your leave request has been {verb}.</p>'
+            '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:20px">'
+            '<tr style="background:#f8f8fb">'
+            '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Leave Type</td>'
+            f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{leave_type}</td>'
+            '</tr><tr>'
+            '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Period</td>'
+            f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{start_date} &rarr; {end_date}</td>'
+            '</tr><tr style="background:#f8f8fb">'
+            '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Duration</td>'
+            f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{duration}</td>'
+            f'</tr>{trailing_rows}</table>'
+            '<p style="margin:0;font-size:11px;color:#aaa;text-align:center">Fotopia HR System &mdash; Automated notification</p>'
+            '<p style="margin:6px 0 0 0;font-size:11px;color:#aaa;text-align:center">'
+            'Contact: <a href="mailto:hr.agent.fotopia@gmail.com" style="color:#c9a84c;text-decoration:none">hr.agent.fotopia@gmail.com</a></p>'
+            '</div></div></body></html>'
+        )
+
+        if is_approved:
+            body_plain = (
+                f"Dear {emp_name},\n\n"
+                f"Your {leave_type} leave request has been approved.\n\n"
+                f"Period: {start_date} to {end_date}\n"
+                f"Duration: {duration}\n"
+                f"Approved by: {mgr_name}\n\n"
+                "Fotopia HR System — Automated notification\n"
+                "Contact: hr.agent.fotopia@gmail.com"
+            )
+        else:
+            raw_comment = lr.get("rejection_reason") or lr.get("manager_comment") or ""
+            body_plain = (
+                f"Dear {emp_name},\n\n"
+                f"Your {leave_type} leave request has been rejected.\n\n"
+                f"Period: {start_date} to {end_date}\n"
+                f"Duration: {duration}\n"
+                f"Rejected by: {mgr_name}\n"
+                + (f"Reason: {raw_comment}\n" if raw_comment else "")
+                + "\nFotopia HR System — Automated notification"
+                + "\nContact: hr.agent.fotopia@gmail.com"
+            )
+
+        email_svc.send_email(
+            to_email=employee.get("notification_email") or employee["email"],
+            subject=f"Leave Request {status_label} — {leave_type}",
+            body_html=body_html,
+            body_plain=body_plain,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "send_leave_decision_email failed (non-blocking) for request %s", leave_request_id
+        )
+
+
+def _send_hr_notification(
+    employee: dict,
+    mgr_employee: dict,
+    lr: dict,
+    leave_type: dict,
+    constraint_decision,
+    days_requested: float,
+) -> None:
+    """Send HR review notification after manager approval. Non-blocking."""
+    try:
+        from services.email import send_email
+        import config
+
+        emp_name = employee.get("full_name", "")
+        emp_code = employee.get("employee_code", "")
+        emp_dept = employee.get("department", "")
+        emp_position = employee.get("position", "")
+        mgr_name = mgr_employee.get("full_name", "Manager") if mgr_employee else "Manager"
+        lt_name = leave_type.get("name_en", lr.get("leave_type_code", ""))
+        start = str(lr.get("start_date", ""))
+        end = str(lr.get("end_date", ""))
+        days = days_requested
+        submitted = lr.get("created_at", "")
+        if submitted:
+            try:
+                from datetime import datetime
+                if hasattr(submitted, 'strftime'):
+                    submitted = submitted.strftime("%d %b %Y, %H:%M")
+                else:
+                    submitted = str(submitted)[:16]
+            except Exception:
+                submitted = str(submitted)[:16]
+
+        # Build compliance flags from constraint decision
+        flags = getattr(constraint_decision, 'flags', []) or []
+        verdict = getattr(constraint_decision, 'verdict', 'allowed')
+
+        def flag_row(icon, text, warning=False):
+            color = "#d97706" if warning else "#16a34a"
+            return (
+                f"<tr><td style='padding:8px 16px;font-size:13px;color:{color}'>"
+                f"{icon} {text}</td></tr>"
+            )
+
+        compliance_rows = ""
+        compliance_rows += flag_row("✅", f"Balance sufficient — {days:.0f} days requested")
+        compliance_rows += flag_row("✅", f"Manager approved — {mgr_name}")
+
+        # Check flags for warnings
+        is_sick = lr.get("leave_type_code", "").lower() == "sick"
+        if is_sick and days > 3:
+            compliance_rows += flag_row("⚠️", "Medical certificate required — sick leave exceeds 3 days", warning=True)
+
+        hire_date = employee.get("start_date") or employee.get("hire_date")
+        if hire_date:
+            try:
+                from datetime import date
+                if hasattr(hire_date, 'days'):
+                    pass
+                else:
+                    hd = hire_date if hasattr(hire_date, 'year') else date.fromisoformat(str(hire_date)[:10])
+                    months_employed = (date.today() - hd).days / 30
+                    if months_employed < 6:
+                        compliance_rows += flag_row("⚠️", f"Probation period — employee hired {int(months_employed)} months ago", warning=True)
+            except Exception:
+                pass
+
+        for flag in flags:
+            compliance_rows += flag_row("ℹ️", flag)
+
+        if not compliance_rows:
+            compliance_rows = flag_row("✅", "All automated checks passed")
+
+        body_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f4f4f7;font-family:Arial,Helvetica,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td align="center" style="padding:30px 15px">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%">
+  <tr>
+    <td style="background:#0a0c1a;padding:24px 30px;text-align:center;border-radius:8px 8px 0 0">
+      <div style="color:#fff;font-size:20px;font-weight:bold;letter-spacing:1px">Fotopia HR System</div>
+      <div style="color:#c9a84c;font-size:12px;margin-top:5px">WIN Holding Group &mdash; HR Portal</div>
+    </td>
+  </tr>
+  <tr>
+    <td style="background:#fff;padding:32px 36px;border-radius:0 0 8px 8px">
+      <div style="font-size:38px;text-align:center;margin-bottom:14px">📋</div>
+      <h2 style="margin:0 0 8px 0;color:#2563eb;font-size:20px;text-align:center">Leave Approved — HR Review Required</h2>
+      <p style="text-align:center;color:#888;font-size:13px;margin:0 0 24px 0">Manager approved. Please update TimeLOG and verify Odoo.</p>
+
+      <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;font-size:14px;margin-bottom:20px">
+        <tr style="background:#f0f4f8">
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e;width:40%">Employee</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{emp_name} ({emp_code})</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e">Department</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{emp_dept}</td>
+        </tr>
+        <tr style="background:#f0f4f8">
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e">Position</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{emp_position}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e">Leave Type</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{lt_name}</td>
+        </tr>
+        <tr style="background:#f0f4f8">
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e">Period</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{start} &rarr; {end}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e">Duration</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{days:.0f} working days</td>
+        </tr>
+        <tr style="background:#f0f4f8">
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e">Submitted</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{submitted}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 16px;font-weight:bold;color:#1a1a2e">Approved by</td>
+          <td style="padding:10px 16px;color:#1a1a2e">{mgr_name}</td>
+        </tr>
+      </table>
+
+      <div style="border:2px solid #c9a84c;border-radius:6px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 10px 0;font-weight:bold;color:#1a1a2e;font-size:13px">COMPLIANCE CHECKS</p>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          {compliance_rows}
+        </table>
+      </div>
+
+      <div style="background:#f8f8fb;border-radius:6px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 10px 0;font-weight:bold;color:#1a1a2e;font-size:13px">ACTION ITEMS</p>
+        <p style="margin:0;font-size:13px;color:#444;line-height:2">
+          ☐ Update TimeLOG attendance system (<a href="https://attendance.win-holding.com" style="color:#c9a84c">attendance.win-holding.com</a>)<br>
+          ☐ Verify Odoo balance updated (auto-synced — please confirm)<br>
+          ☐ Update Excel leave register
+        </p>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0">
+      <p style="margin:0;font-size:11px;color:#aaa;text-align:center">
+        Fotopia HR System &mdash; HR Copy. Employee and manager notified separately.<br>
+        Questions? <a href="mailto:hr.agent.fotopia@gmail.com" style="color:#c9a84c">hr.agent.fotopia@gmail.com</a>
+      </p>
+    </td>
+  </tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+        body_plain = (
+            f"HR REVIEW REQUIRED\n\n"
+            f"Employee: {emp_name} ({emp_code})\n"
+            f"Department: {emp_dept}\n"
+            f"Leave Type: {lt_name}\n"
+            f"Period: {start} to {end}\n"
+            f"Duration: {days:.0f} working days\n"
+            f"Approved by: {mgr_name}\n\n"
+            f"ACTION ITEMS:\n"
+            f"[ ] Update TimeLOG\n"
+            f"[ ] Verify Odoo balance\n"
+            f"[ ] Update Excel leave register\n\n"
+            f"Fotopia HR System — HR Copy"
+        )
+
+        hr_inbox = getattr(config, 'IMAP_USERNAME', 'hr.agent.fotopia@gmail.com')
+        send_email(
+            to_email=hr_inbox,
+            subject=f"HR Review Required: {emp_name} — {lt_name} ✓ Manager Approved",
+            body_html=body_html,
+            body_plain=body_plain,
+            reply_to=hr_inbox,
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("HR notification email failed (non-blocking): %s", e)
+
+
 # ─── Tool 6: approve_leave_request ───────────────────────────────────────────
 
 class ApproveLeaveRequestTool(Tool):
@@ -1366,58 +1679,22 @@ class ApproveLeaveRequestTool(Tool):
         # Notify employee
         employee = self._ds.get_employee_by_code(ctx.tenant_id, lr["employee_code"])
         if employee and employee.get("email"):
-            emp_name   = employee.get("full_name") or employee["email"]
-            mgr_name   = mgr_employee.get("full_name", "Your manager") if mgr_employee else "HR"
             leave_type = lr["leave_type_name"]
-            start_date = str(lr.get("start_date", ""))
-            end_date   = str(lr.get("end_date", ""))
             days_n     = lr.get("days_requested")
-            duration   = (
-                f"{float(days_n):.0f} day{'s' if float(days_n) != 1 else ''}"
-                if days_n else f"{lr.get('duration_hours', '?')} hours"
+
+            send_leave_decision_email(
+                self._ds, ctx.tenant_id, request_id, "approved",
+                resolved_by_employee_code=ctx.employee_code,
             )
-            body_html = (
-                '<html><body style="font-family:Arial,sans-serif;background:#f4f4f7;margin:0;padding:20px">'
-                '<div style="max-width:480px;margin:0 auto">'
-                '<div style="background:#0a0c1a;padding:16px 24px;border-radius:8px 8px 0 0;text-align:center">'
-                '<div style="color:#fff;font-size:16px;font-weight:bold">Fotopia HR System</div>'
-                '<div style="color:#c9a84c;font-size:11px;margin-top:4px">WIN Holding Group</div>'
-                '</div>'
-                '<div style="background:#fff;padding:32px 28px;border-radius:0 0 8px 8px">'
-                '<div style="font-size:36px;text-align:center;margin-bottom:16px;color:#16a34a">&#10003;</div>'
-                '<h2 style="margin:0 0 8px 0;color:#16a34a;font-size:20px;text-align:center">Leave Request Approved</h2>'
-                f'<p style="margin:0 0 20px 0;color:#555;font-size:14px;line-height:1.6;text-align:center">'
-                f'Dear {emp_name}, your leave request has been approved.</p>'
-                '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:20px">'
-                '<tr style="background:#f8f8fb">'
-                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Leave Type</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{leave_type}</td>'
-                '</tr><tr>'
-                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Period</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{start_date} &rarr; {end_date}</td>'
-                '</tr><tr style="background:#f8f8fb">'
-                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Duration</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{duration}</td>'
-                '</tr><tr>'
-                '<td style="padding:10px 14px;color:#666">Approved by</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e">{mgr_name}</td>'
-                '</tr></table>'
-                '<p style="margin:0;font-size:11px;color:#aaa;text-align:center">Fotopia HR System &mdash; Automated notification</p>'
-                '</div></div></body></html>'
-            )
-            body_plain = (
-                f"Dear {emp_name},\n\n"
-                f"Your {leave_type} leave request has been approved.\n\n"
-                f"Period: {start_date} to {end_date}\n"
-                f"Duration: {duration}\n"
-                f"Approved by: {mgr_name}\n\n"
-                "Fotopia HR System — Automated notification"
-            )
-            email_svc.send_email(
-                to_email=employee.get("notification_email") or employee["email"],
-                subject=f"Leave Request Approved — {leave_type}",
-                body_html=body_html,
-                body_plain=body_plain,
+
+            # HR review copy — non-blocking, sent after the employee confirmation
+            _send_hr_notification(
+                employee,
+                mgr_employee,
+                lr,
+                {"name_en": leave_type},
+                constraint,
+                float(days_n) if days_n is not None else 0.0,
             )
 
         # Odoo sync — non-blocking, never rolls back the approval
@@ -1568,66 +1845,9 @@ class RejectLeaveRequestTool(Tool):
         # Notify employee
         employee = self._ds.get_employee_by_code(ctx.tenant_id, lr["employee_code"])
         if employee and employee.get("email"):
-            emp_name   = employee.get("full_name") or employee["email"]
-            mgr_name   = mgr_employee.get("full_name", "Your manager") if mgr_employee else "HR"
-            leave_type = lr["leave_type_name"]
-            start_date = str(lr.get("start_date", ""))
-            end_date   = str(lr.get("end_date", ""))
-            days_n     = lr.get("days_requested")
-            duration   = (
-                f"{float(days_n):.0f} day{'s' if float(days_n) != 1 else ''}"
-                if days_n else f"{lr.get('duration_hours', '?')} hours"
-            )
-            safe_comment = sanitize_for_html_email(comment)
-            reason_row_html = (
-                '<tr style="background:#f8f8fb">'
-                '<td style="padding:10px 14px;color:#666">Reason</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e">{safe_comment}</td>'
-                '</tr>'
-            ) if comment else ''
-            body_html = (
-                '<html><body style="font-family:Arial,sans-serif;background:#f4f4f7;margin:0;padding:20px">'
-                '<div style="max-width:480px;margin:0 auto">'
-                '<div style="background:#0a0c1a;padding:16px 24px;border-radius:8px 8px 0 0;text-align:center">'
-                '<div style="color:#fff;font-size:16px;font-weight:bold">Fotopia HR System</div>'
-                '<div style="color:#c9a84c;font-size:11px;margin-top:4px">WIN Holding Group</div>'
-                '</div>'
-                '<div style="background:#fff;padding:32px 28px;border-radius:0 0 8px 8px">'
-                '<div style="font-size:36px;text-align:center;margin-bottom:16px;color:#dc2626">&#10007;</div>'
-                '<h2 style="margin:0 0 8px 0;color:#dc2626;font-size:20px;text-align:center">Leave Request Rejected</h2>'
-                f'<p style="margin:0 0 20px 0;color:#555;font-size:14px;line-height:1.6;text-align:center">'
-                f'Dear {emp_name}, your leave request has been rejected.</p>'
-                '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:20px">'
-                '<tr style="background:#f8f8fb">'
-                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Leave Type</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{leave_type}</td>'
-                '</tr><tr>'
-                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Period</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{start_date} &rarr; {end_date}</td>'
-                '</tr><tr style="background:#f8f8fb">'
-                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Duration</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{duration}</td>'
-                '</tr><tr>'
-                '<td style="padding:10px 14px;color:#666;border-bottom:1px solid #e0e0e0">Rejected by</td>'
-                f'<td style="padding:10px 14px;font-weight:600;color:#1a1a2e;border-bottom:1px solid #e0e0e0">{mgr_name}</td>'
-                f'</tr>{reason_row_html}</table>'
-                '<p style="margin:0;font-size:11px;color:#aaa;text-align:center">Fotopia HR System &mdash; Automated notification</p>'
-                '</div></div></body></html>'
-            )
-            body_plain = (
-                f"Dear {emp_name},\n\n"
-                f"Your {leave_type} leave request has been rejected.\n\n"
-                f"Period: {start_date} to {end_date}\n"
-                f"Duration: {duration}\n"
-                f"Rejected by: {mgr_name}\n"
-                + (f"Reason: {comment}\n" if comment else "")
-                + "\nFotopia HR System — Automated notification"
-            )
-            email_svc.send_email(
-                to_email=employee.get("notification_email") or employee["email"],
-                subject=f"Leave Request Rejected — {leave_type}",
-                body_html=body_html,
-                body_plain=body_plain,
+            send_leave_decision_email(
+                self._ds, ctx.tenant_id, request_id, "rejected",
+                resolved_by_employee_code=ctx.employee_code,
             )
 
         result_data: dict = {

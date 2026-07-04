@@ -96,6 +96,14 @@ export async function fetchPendingApprovals() {
   return res.json()
 }
 
+export async function exportLeaveExcel() {
+  const res = await fetch(`${API_URL}/api/leave/export/excel`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Export failed (${res.status})`)
+  return res.blob()
+}
+
 export async function approveLeaveRequest(requestId, comment, overrideReason) {
   const res = await fetch(`${API_URL}/api/leave/${requestId}/approve`, {
     method: 'POST',

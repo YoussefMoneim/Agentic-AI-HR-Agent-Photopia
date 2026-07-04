@@ -216,22 +216,13 @@ def process_inbound_email(
 
     # ── Step 6: Employee confirmation email ───────────────────────────────────
     # Symmetric with the link-click path in api/main.py — employee must be notified
-    # regardless of which resolution path was used.
+    # regardless of which resolution path was used. Shared branded template with
+    # the chat-tool and email-link paths (tools.leave.send_leave_decision_email).
     try:
-        employee_code = result.get("employee_code")
-        if employee_code:
-            emp = ds.get_employee_by_code(tenant_id, employee_code)
-            if emp and emp.get("email"):
-                from services import email as email_svc
-                status_word = "approved" if decision == "approved" else "rejected"
-                email_svc.send_email(
-                    to_email=emp.get("notification_email") or emp["email"],
-                    subject=f"Leave Request {status_word.capitalize()} — {emp['full_name']}",
-                    body_html=(
-                        f"<p>Your leave request has been <strong>{status_word}</strong>.</p>"
-                    ),
-                    body_plain=f"Your leave request has been {status_word}.",
-                )
+        leave_request_id = result.get("leave_request_id")
+        if leave_request_id:
+            from tools.leave import send_leave_decision_email
+            send_leave_decision_email(ds, tenant_id, leave_request_id, decision)
     except Exception:
         _log.exception(
             "process_inbound_email: failed to send employee confirmation for %s", pa["id"]
