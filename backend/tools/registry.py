@@ -93,6 +93,9 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         SubmitLeaveRequestTool,
     )
     from tools.policy import SearchPolicyTool
+    from knowledge.factory import get_knowledge_base
+
+    knowledge_base = get_knowledge_base()
 
     tools: list[Tool] = [
         # Employee read tools (7)
@@ -123,7 +126,7 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         ApproveLeaveCancellationTool(data_source),
         GetPendingCancellationsTool(data_source),
         # Policy search / RAG (1)
-        SearchPolicyTool(data_source),
+        SearchPolicyTool(knowledge_base),
         # Document sensitivity tools (2)
         CheckDocumentSensitivityTool(data_source),
         SensitivityAuditTool(data_source),

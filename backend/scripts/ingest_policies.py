@@ -1,128 +1,119 @@
 """
-Ingestion script: walks backend/policies/, chunks by ## heading boundaries,
-and upserts chunks into private_document_chunks for the fotopia tenant.
+Ingestion script: walks backend/policies/, chunks documents,
+generates Voyage AI embeddings, and stores in private_document_chunks.
 
 Run:
     docker exec fotopia-hr-agent-backend-1 python scripts/ingest_policies.py
 
-Idempotent: deletes existing chunks for (tenant_id, source_file) before re-inserting.
-Empty files are skipped — placeholders stay silent until real content is added.
+Idempotent: deletes existing chunks for (tenant_id, document_id) before re-inserting.
+Empty files are skipped.
+Requires VOYAGE_API_KEY in environment.
 """
 
 import os
-import re
 import sys
 from pathlib import Path
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if not DATABASE_URL:
-    print("ERROR: DATABASE_URL environment variable not set", file=sys.stderr)
+    print("ERROR: DATABASE_URL not set", file=sys.stderr)
     sys.exit(1)
 
+# Add app root to path so knowledge/ imports work
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import config
+from knowledge.factory import get_knowledge_base
+
 POLICIES_DIR = Path(__file__).parent.parent / "policies"
-MAX_CHUNK_CHARS = 3200
 
 ACL_MAP = {
     "public": {
-        "sensitivity": "public_tenant",
-        "allowed_roles": ["employee", "hr_staff", "hr_manager", "admin"],
+        "access_level": "all",
+        "document_type": "policy",
     },
     "enterprise": {
-        "sensitivity": "restricted",
-        "allowed_roles": ["hr_manager", "admin"],
+        "access_level": "hr_manager",
+        "document_type": "policy",
     },
 }
 
 
-def split_into_chunks(text: str) -> list[str]:
-    """Split at ## headings; further split oversized sections at blank lines."""
-    sections = re.split(r"(?=^## )", text, flags=re.MULTILINE)
-    chunks = []
-    for section in sections:
-        section = section.strip()
-        if not section:
-            continue
-        if len(section) <= MAX_CHUNK_CHARS:
-            chunks.append(section)
-        else:
-            # Split at blank lines, keeping heading with first sub-chunk
-            paragraphs = re.split(r"\n{2,}", section)
-            current = ""
-            for para in paragraphs:
-                if current and len(current) + len(para) + 2 > MAX_CHUNK_CHARS:
-                    chunks.append(current.strip())
-                    current = para
-                else:
-                    current = (current + "\n\n" + para).strip() if current else para
-            if current:
-                chunks.append(current.strip())
-    return chunks
-
-
-def ingest():
+def get_fotopia_tenant_id() -> str:
     conn = psycopg2.connect(DATABASE_URL)
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor() as cur:
             cur.execute("SELECT id FROM tenants WHERE slug = 'fotopia'")
             row = cur.fetchone()
             if row is None:
-                print("ERROR: fotopia tenant not found in DB", file=sys.stderr)
+                print("ERROR: fotopia tenant not found", file=sys.stderr)
                 sys.exit(1)
-            tenant_id = str(row["id"])
-
-        total_inserted = 0
-
-        for md_file in sorted(POLICIES_DIR.rglob("*.md")):
-            content = md_file.read_text(encoding="utf-8").strip()
-            if not content:
-                print(f"  {md_file.name}: skipped (empty)")
-                continue
-
-            parent_dir = md_file.parent.name
-            acl = ACL_MAP.get(parent_dir)
-            if acl is None:
-                print(f"  {md_file.name}: skipped (unknown ACL tier '{parent_dir}')")
-                continue
-
-            source_file = str(md_file.relative_to(POLICIES_DIR.parent))
-            document_id = md_file.stem
-            chunks = split_into_chunks(content)
-
-            with conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "DELETE FROM private_document_chunks WHERE tenant_id = %s AND source_file = %s",
-                        (tenant_id, source_file),
-                    )
-                    for idx, chunk_text in enumerate(chunks):
-                        cur.execute(
-                            """
-                            INSERT INTO private_document_chunks
-                                (tenant_id, document_id, chunk_index, content,
-                                 sensitivity, allowed_roles, source_file, classified_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, now())
-                            """,
-                            (
-                                tenant_id,
-                                document_id,
-                                idx,
-                                chunk_text,
-                                acl["sensitivity"],
-                                acl["allowed_roles"],
-                                source_file,
-                            ),
-                        )
-
-            print(f"  {md_file.name}: {len(chunks)} chunks inserted (sensitivity={acl['sensitivity']})")
-            total_inserted += len(chunks)
-
-        print(f"\nDone. Total chunks inserted: {total_inserted}")
+            return str(row[0])
     finally:
         conn.close()
 
 
+def main():
+    if not config.VOYAGE_API_KEY or "your_voyage" in config.VOYAGE_API_KEY:
+        print("ERROR: VOYAGE_API_KEY not set in .env", file=sys.stderr)
+        sys.exit(1)
+
+    tenant_id = get_fotopia_tenant_id()
+    kb = get_knowledge_base()
+    print(f"Ingesting policies for tenant: {tenant_id}\n")
+
+    total_chunks = 0
+    total_files = 0
+
+    for md_file in sorted(POLICIES_DIR.rglob("*.md")):
+        content = md_file.read_text(encoding="utf-8").strip()
+        if not content:
+            print(f"  {md_file.name}: skipped (empty)")
+            continue
+
+        parent_dir = md_file.parent.name
+        acl = ACL_MAP.get(parent_dir)
+        if acl is None:
+            print(f"  {md_file.name}: skipped (unknown dir '{parent_dir}')")
+            continue
+
+        # Use stem as document_id for consistency with existing convention
+        document_name = md_file.stem
+        source_url = str(md_file.relative_to(POLICIES_DIR.parent))
+
+        print(f"  {md_file.name} ({len(content)} chars)...")
+
+        result = kb.ingest(
+            content=content,
+            document_name=document_name,
+            document_type=acl["document_type"],
+            tenant_id=tenant_id,
+            access_level=acl["access_level"],
+            ingested_by="system:ingest_policies",
+            metadata={"source_path": str(md_file)},
+            source_url=source_url,
+        )
+
+        if result.success:
+            print(
+                f"  ✓ {result.document_name}: "
+                f"{result.chunks_created} chunks"
+                + (f", {result.chunks_replaced} replaced" if result.chunks_replaced else "")
+            )
+            total_chunks += result.chunks_created
+            total_files += 1
+        else:
+            print(f"  ✗ FAILED: {result.error}")
+
+    print(f"\nDone: {total_files} files, {total_chunks} total chunks")
+    print("\nNext: run validation")
+    print(
+        "  docker exec fotopia-hr-agent-backend-1 "
+        "python /app/scripts/test_knowledge_base.py"
+    )
+
+
 if __name__ == "__main__":
-    ingest()
+    main()

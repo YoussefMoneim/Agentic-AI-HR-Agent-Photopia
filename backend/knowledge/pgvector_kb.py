@@ -130,9 +130,23 @@ class PgvectorKnowledgeBase(KnowledgeBase):
                 )
                 has_embeddings = cur.fetchone()["n"] > 0
 
+                query_embedding = None
                 if has_embeddings:
+                    try:
+                        query_embedding = self._embed_query(query)
+                    except Exception:
+                        # Voyage call failed (rate limit, timeout, outage) — degrade
+                        # to full-text rather than breaking the tool. This is the
+                        # same "never breaks" promise as the no-embeddings-yet case,
+                        # extended to cover a live-call failure too.
+                        _log.warning(
+                            "search: embedding call failed for tenant %s, "
+                            "falling back to full-text",
+                            tenant_id, exc_info=True,
+                        )
+
+                if query_embedding is not None:
                     # Vector similarity search
-                    query_embedding = self._embed_query(query)
                     cur.execute(
                         """
                         SELECT
