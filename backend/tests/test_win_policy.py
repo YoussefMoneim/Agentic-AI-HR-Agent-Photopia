@@ -24,6 +24,7 @@ import psycopg2
 import pytest
 from datetime import date, timedelta
 
+import config
 from tools.leave import (
     AddCompensatoryDayTool,
     CheckLeaveEligibilityTool,
@@ -51,17 +52,23 @@ PATERNITY_END_1 = PATERNITY_START                                   # 1 calendar
 PATERNITY_END_2 = (date.today() + timedelta(days=31)).isoformat()   # 2 calendar days
 
 def _working_days_from_today(n: int) -> str:
+    """Egypt work week: Sun-Thu, weekend is Friday+Saturday (config.EGYPT_WEEKEND_DAYS)."""
+    weekend = set(getattr(config, "EGYPT_WEEKEND_DAYS", [4, 5]))
+    holidays = {date.fromisoformat(h) for h in getattr(config, "EGYPT_PUBLIC_HOLIDAYS_2026", [])}
     d = date.today()
     count = 0
     while count < n:
         d += timedelta(days=1)
-        if d.weekday() < 5:
+        if d.weekday() not in weekend and d not in holidays:
             count += 1
     return str(d)
 
 CASUAL_START = _working_days_from_today(3)  # 3rd working day — passes ≤3-day notice
-CASUAL_END_2 = _working_days_from_today(4)  # 4th working day — 2-day span from CASUAL_START
-CASUAL_END_3 = _working_days_from_today(5)  # 5th working day — 3-day span from CASUAL_START
+# END_2/END_3 are direct calendar-day offsets from CASUAL_START (not independent
+# working-day lookups) so the span is always exactly 2/3 calendar days regardless
+# of whether a weekend falls between them — _calendar_days() counts calendar days.
+CASUAL_END_2 = str(date.fromisoformat(CASUAL_START) + timedelta(days=1))  # 2-day span from CASUAL_START
+CASUAL_END_3 = str(date.fromisoformat(CASUAL_START) + timedelta(days=2))  # 3-day span from CASUAL_START
 
 # Dates far enough ahead to pass 7-working-day notice requirement (>3-day annual)
 AHEAD_START     = "2026-08-10"   # Monday well past July 7 notice deadline

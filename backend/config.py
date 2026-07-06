@@ -9,6 +9,7 @@ load_dotenv()
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")   # raises KeyError at startup if missing — intentional
 XAI_API_KEY: str = os.getenv("XAI_API_KEY", "")            # only needed when LLM_PROVIDER=grok
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "claude")
 LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-sonnet-4-5")
 

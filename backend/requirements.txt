@@ -16,3 +16,4 @@ pypdf>=4.0.0
 python-docx>=1.1.0
 python-multipart>=0.0.9
 openpyxl==3.1.5
+voyageai>=0.2.3
