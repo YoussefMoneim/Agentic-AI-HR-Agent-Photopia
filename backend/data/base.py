@@ -371,6 +371,91 @@ class DataSource(ABC):
         Returns: {id, employee_code, full_name, email, notification_email,
                   department, position, role}"""
 
+    # ─── Onboarding ───────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def get_onboarding_templates(self, tenant_id: str) -> list[dict]:
+        """Return all active onboarding templates for the tenant.
+        Each row: {id, name, description, is_default, is_active, created_at}."""
+
+    @abstractmethod
+    def get_onboarding_template_steps(self, tenant_id: str, template_id: str) -> list[dict]:
+        """Return all steps for a template ordered by sort_order.
+        Each row: {id, sort_order, title, description, category, owner,
+                   due_offset_days, is_required}."""
+
+    @abstractmethod
+    def get_onboarding_case(self, tenant_id: str, employee_id: str) -> dict | None:
+        """Return the onboarding_case for the employee, or None if none exists.
+        Includes steps as a nested list under 'steps'."""
+
+    @abstractmethod
+    def create_onboarding_case(
+        self,
+        tenant_id: str,
+        employee_id: str,
+        template_id: str | None,
+        created_by_user_id: str,
+        employee_start_date: str | None,
+    ) -> dict:
+        """Create onboarding_cases + snapshot of template steps as onboarding_case_steps.
+        If template_id is None, uses the tenant's is_default=TRUE template.
+        employee_start_date (ISO date) is used to compute due_date per step.
+        Returns {case_id, employee_id, template_name, steps_created}."""
+
+    @abstractmethod
+    def update_onboarding_step(
+        self,
+        tenant_id: str,
+        step_id: str,
+        new_status: str,
+        completed_by_user_id: str,
+        notes: str | None,
+    ) -> dict:
+        """Update a single onboarding_case_steps row.
+        Sets status, completed_at (when status=completed), completed_by_user_id, notes.
+        If all required steps for the case are now completed/skipped, auto-completes the case.
+        Returns {step_id, new_status, case_id, case_auto_completed}."""
+
+    @abstractmethod
+    def upsert_onboarding_template(
+        self,
+        tenant_id: str,
+        name: str,
+        description: str | None,
+        steps: list[dict],
+        set_as_default: bool,
+        created_by_user_id: str,
+        template_id: str | None = None,
+    ) -> dict:
+        """Create a new template or replace the steps of an existing one.
+        If template_id is provided: delete existing steps and insert new ones.
+        If template_id is None: create a new template then insert steps.
+        steps list items: {title, description, category, owner, due_offset_days, is_required, sort_order}.
+        Returns {template_id, name, steps_count, is_default}."""
+
+    @abstractmethod
+    def create_employee_record(
+        self,
+        tenant_id: str,
+        full_name: str,
+        arabic_name: str | None,
+        position: str,
+        department: str,
+        employment_type: str,
+        start_date: str,
+        email: str,
+        notification_email: str | None,
+        basic_salary: float,
+        housing_allowance: float,
+        transport_allowance: float,
+        manager_code: str | None,
+        birth_date: str | None,
+        created_by_user_id: str,
+    ) -> dict:
+        """Insert a new employee row. employee_code and role are generated server-side
+        (role is always 'employee' — never caller-supplied). Returns the created employee dict."""
+
     @abstractmethod
     def check_and_record_rate_limit(
         self,

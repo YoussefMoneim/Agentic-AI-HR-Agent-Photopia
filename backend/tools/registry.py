@@ -92,6 +92,13 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         RequestLeaveCancellationTool,
         SubmitLeaveRequestTool,
     )
+    from tools.employee_write import CreateEmployeeRecordTool
+    from tools.onboarding import (
+        CreateOnboardingTool,
+        CustomizeOnboardingTemplateTool,
+        GetOnboardingStatusTool,
+        UpdateOnboardingStepTool,
+    )
     from tools.policy import SearchPolicyTool
 
     tools: list[Tool] = [
@@ -129,5 +136,12 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         SensitivityAuditTool(data_source),
         # Calendar (1)
         GetTeamCalendarTool(data_source),
+        # Employee write tools (HITL-gated)
+        CreateEmployeeRecordTool(data_source),
+        # Onboarding (4)
+        CreateOnboardingTool(data_source),
+        GetOnboardingStatusTool(data_source),
+        UpdateOnboardingStepTool(data_source),
+        CustomizeOnboardingTemplateTool(data_source),
     ]
     return ToolRegistry(tools, audit_logger)

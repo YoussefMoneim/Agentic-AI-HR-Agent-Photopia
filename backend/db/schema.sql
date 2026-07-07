@@ -41,6 +41,8 @@ CREATE TABLE employees (
     currency TEXT DEFAULT 'EGP',
     annual_leave_balance INTEGER DEFAULT 0,  -- deprecated: superseded by leave_balances table
     email TEXT,
+    notification_email TEXT,  -- override email for notifications; falls back to email
+    birth_date DATE,
     manager_name TEXT,       -- legacy free-text; manager_id FK is authoritative
     manager_id UUID REFERENCES employees(id),  -- direct manager; self-referential FK
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -81,8 +83,10 @@ CREATE TABLE leave_types (
     deducts_balance BOOLEAN NOT NULL DEFAULT TRUE,      -- FALSE: emergency, permission, business_trip, wfh, outside_duty
     is_time_based BOOLEAN NOT NULL DEFAULT FALSE,       -- TRUE only for Permission (hours, not days)
     requires_hr_review BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE: annual, sick, emergency, business_trip, compensatory, unpaid
-    max_days_per_year INTEGER,    -- NULL = no annual cap
-    max_consecutive_days INTEGER, -- NULL = no per-request limit
+    max_days_per_year INTEGER,       -- NULL = no annual cap
+    max_consecutive_days INTEGER,    -- NULL = no per-request limit
+    max_times_in_career INTEGER,     -- NULL = no career cap (marriage=1, hajj=1, umrah=1, maternity=3, paternity=3)
+    service_min_days INTEGER NOT NULL DEFAULT 0,  -- minimum employment days before eligible
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     UNIQUE (tenant_id, code)
 );
@@ -258,6 +262,85 @@ CREATE TABLE workflow_events (
 CREATE INDEX ON workflow_events(tenant_id, workflow_instance_id);
 CREATE INDEX ON workflow_events(tenant_id, created_at DESC);
 
+-- ─── Onboarding module ───────────────────────────────────────────────────────
+-- Templates are per-tenant and customisable. is_default=TRUE is used when
+-- create_onboarding is called without a template_id.
+CREATE TABLE onboarding_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    name TEXT NOT NULL,
+    description TEXT,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, name)
+);
+
+-- Steps are copied (snapshotted) to onboarding_case_steps at case creation so
+-- later template edits never mutate in-progress onboardings.
+CREATE TABLE onboarding_template_steps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    template_id UUID NOT NULL REFERENCES onboarding_templates(id) ON DELETE CASCADE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT NOT NULL DEFAULT 'documentation'
+        CHECK (category IN ('documentation', 'it_access', 'policies', 'training', 'team_intro', 'compliance')),
+    owner TEXT NOT NULL DEFAULT 'hr'
+        CHECK (owner IN ('hr', 'it', 'manager', 'employee')),
+    due_offset_days INTEGER NOT NULL DEFAULT 1,  -- calendar days from employee start_date
+    is_required BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_onboarding_template_steps_template
+    ON onboarding_template_steps(tenant_id, template_id, sort_order);
+
+-- One active onboarding case per employee (UNIQUE constraint enforces this).
+CREATE TABLE onboarding_cases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    employee_id UUID NOT NULL REFERENCES employees(id),
+    template_id UUID REFERENCES onboarding_templates(id),
+    status TEXT NOT NULL DEFAULT 'in_progress'
+        CHECK (status IN ('in_progress', 'completed', 'cancelled')),
+    created_by_user_id TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, employee_id)
+);
+CREATE INDEX idx_onboarding_cases_tenant_status ON onboarding_cases(tenant_id, status);
+CREATE INDEX idx_onboarding_cases_employee      ON onboarding_cases(tenant_id, employee_id);
+
+-- Snapshot of template steps taken at case creation time.
+CREATE TABLE onboarding_case_steps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    case_id UUID NOT NULL REFERENCES onboarding_cases(id) ON DELETE CASCADE,
+    template_step_id UUID REFERENCES onboarding_template_steps(id),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT NOT NULL DEFAULT 'documentation'
+        CHECK (category IN ('documentation', 'it_access', 'policies', 'training', 'team_intro', 'compliance')),
+    owner TEXT NOT NULL DEFAULT 'hr'
+        CHECK (owner IN ('hr', 'it', 'manager', 'employee')),
+    due_date DATE,
+    is_required BOOLEAN NOT NULL DEFAULT TRUE,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'in_progress', 'completed', 'skipped', 'blocked')),
+    notes TEXT,
+    completed_at TIMESTAMPTZ,
+    completed_by_user_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_onboarding_case_steps_case   ON onboarding_case_steps(tenant_id, case_id, sort_order);
+CREATE INDEX idx_onboarding_case_steps_status ON onboarding_case_steps(tenant_id, case_id, status);
+
 -- ─── Row Level Security ───────────────────────────────────────────────────────
 -- All tenant-scoped tables require SET app.current_tenant_id = '<uuid>' on
 -- every connection before querying. Unset or NULL → 0 rows (fail-closed).
@@ -323,6 +406,30 @@ CREATE POLICY tenant_isolation ON audit_log FOR ALL
     USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
     WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
 
+ALTER TABLE onboarding_templates      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_templates      FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON onboarding_templates FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE onboarding_template_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_template_steps FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON onboarding_template_steps FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE onboarding_cases          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_cases          FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON onboarding_cases FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+ALTER TABLE onboarding_case_steps     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_case_steps     FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON onboarding_case_steps FOR ALL
+    USING      (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
 -- ─── Application role (non-superuser so RLS policies actually enforce) ────────
 -- Superusers bypass RLS even with FORCE. The app must SET ROLE fotopia_app so
 -- row-level policies apply. This block is idempotent and safe to re-run.
@@ -337,6 +444,14 @@ $$;
 GRANT USAGE ON SCHEMA public TO fotopia_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO fotopia_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO fotopia_app;
+
+-- Explicit grants for onboarding tables (belt-and-suspenders alongside the
+-- GRANT ALL TABLES above — ensures the tables are covered even if the role was
+-- created before these tables existed in a live database).
+GRANT SELECT, INSERT, UPDATE, DELETE ON onboarding_templates       TO fotopia_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON onboarding_template_steps  TO fotopia_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON onboarding_cases           TO fotopia_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON onboarding_case_steps      TO fotopia_app;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO fotopia_app;

@@ -2027,3 +2027,471 @@ class PostgreSQLDataSource(DataSource):
                 return {"allowed": True, "count": new_count, "blocked_until": None}
         finally:
             self._release(conn)
+
+    # ─── Onboarding ───────────────────────────────────────────────────────────
+
+    def get_onboarding_templates(self, tenant_id: str) -> list[dict]:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, name, description, is_default, is_active, created_at
+                    FROM onboarding_templates
+                    WHERE tenant_id = %s AND is_active = TRUE
+                    ORDER BY is_default DESC, name
+                    """,
+                    (tenant_id,),
+                )
+                rows = []
+                for row in cur.fetchall():
+                    r = dict(row)
+                    r["id"] = str(r["id"])
+                    r["created_at"] = _isodate(r.get("created_at"))
+                    rows.append(r)
+                return rows
+        finally:
+            self._release(conn)
+
+    def get_onboarding_template_steps(self, tenant_id: str, template_id: str) -> list[dict]:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, sort_order, title, description, category, owner,
+                           due_offset_days, is_required
+                    FROM onboarding_template_steps
+                    WHERE tenant_id = %s AND template_id = %s
+                    ORDER BY sort_order
+                    """,
+                    (tenant_id, template_id),
+                )
+                rows = []
+                for row in cur.fetchall():
+                    r = dict(row)
+                    r["id"] = str(r["id"])
+                    rows.append(r)
+                return rows
+        finally:
+            self._release(conn)
+
+    def get_onboarding_case(self, tenant_id: str, employee_id: str) -> dict | None:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT oc.id, oc.employee_id, oc.template_id, oc.status,
+                           oc.started_at, oc.completed_at,
+                           ot.name AS template_name
+                    FROM onboarding_cases oc
+                    LEFT JOIN onboarding_templates ot ON ot.id = oc.template_id
+                    WHERE oc.tenant_id = %s AND oc.employee_id = %s
+                    """,
+                    (tenant_id, employee_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                case = dict(row)
+                case["id"] = str(case["id"])
+                case["employee_id"] = str(case["employee_id"])
+                case["template_id"] = str(case["template_id"]) if case.get("template_id") else None
+                case["started_at"] = _isodate(case.get("started_at"))
+                case["completed_at"] = _isodate(case.get("completed_at"))
+
+                # Fetch steps
+                cur.execute(
+                    """
+                    SELECT id, sort_order, title, description, category, owner,
+                           due_date, is_required, status, notes, completed_at
+                    FROM onboarding_case_steps
+                    WHERE tenant_id = %s AND case_id = %s
+                    ORDER BY sort_order
+                    """,
+                    (tenant_id, case["id"]),
+                )
+                steps = []
+                for srow in cur.fetchall():
+                    s = dict(srow)
+                    s["id"] = str(s["id"])
+                    s["due_date"] = _isodate(s.get("due_date"))
+                    s["completed_at"] = _isodate(s.get("completed_at"))
+                    steps.append(s)
+                case["steps"] = steps
+
+                # Compute progress
+                total = len(steps)
+                done = sum(1 for s in steps if s["status"] in ("completed", "skipped"))
+                required_total = sum(1 for s in steps if s["is_required"])
+                required_done = sum(1 for s in steps if s["is_required"] and s["status"] in ("completed", "skipped"))
+                case["progress"] = {
+                    "total_steps": total,
+                    "completed_steps": done,
+                    "required_steps": required_total,
+                    "required_done": required_done,
+                    "percent_complete": round(done / total * 100) if total else 0,
+                }
+                return case
+        finally:
+            self._release(conn)
+
+    def create_onboarding_case(
+        self,
+        tenant_id: str,
+        employee_id: str,
+        template_id: str | None,
+        created_by_user_id: str,
+        employee_start_date: str | None,
+    ) -> dict:
+        from datetime import date, timedelta
+
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Resolve template
+                    if template_id:
+                        cur.execute(
+                            "SELECT id, name FROM onboarding_templates WHERE tenant_id = %s AND id = %s AND is_active = TRUE",
+                            (tenant_id, template_id),
+                        )
+                    else:
+                        cur.execute(
+                            "SELECT id, name FROM onboarding_templates WHERE tenant_id = %s AND is_default = TRUE AND is_active = TRUE LIMIT 1",
+                            (tenant_id,),
+                        )
+                    tmpl_row = cur.fetchone()
+                    if tmpl_row is None:
+                        raise ValueError("No suitable onboarding template found for this tenant.")
+                    tmpl = dict(tmpl_row)
+                    tmpl["id"] = str(tmpl["id"])
+
+                    # Create the case (UNIQUE constraint prevents duplicates)
+                    try:
+                        cur.execute(
+                            """
+                            INSERT INTO onboarding_cases
+                                (tenant_id, employee_id, template_id, created_by_user_id)
+                            VALUES (%s, %s, %s, %s)
+                            RETURNING id
+                            """,
+                            (tenant_id, employee_id, tmpl["id"], created_by_user_id),
+                        )
+                    except Exception as exc:
+                        if "unique" in str(exc).lower():
+                            raise ValueError("An onboarding case already exists for this employee. Use get_onboarding_status to view it.")
+                        raise
+                    case_id = str(cur.fetchone()["id"])
+
+                    # Load template steps
+                    cur.execute(
+                        """
+                        SELECT id, sort_order, title, description, category, owner,
+                               due_offset_days, is_required
+                        FROM onboarding_template_steps
+                        WHERE tenant_id = %s AND template_id = %s
+                        ORDER BY sort_order
+                        """,
+                        (tenant_id, tmpl["id"]),
+                    )
+                    t_steps = [dict(r) for r in cur.fetchall()]
+
+                    # Parse start date for due_date calculation
+                    start = None
+                    if employee_start_date:
+                        try:
+                            start = date.fromisoformat(employee_start_date[:10])
+                        except ValueError:
+                            start = None
+
+                    # Snapshot steps into onboarding_case_steps
+                    for step in t_steps:
+                        due_date = None
+                        if start is not None:
+                            due_date = start + timedelta(days=step["due_offset_days"])
+                        cur.execute(
+                            """
+                            INSERT INTO onboarding_case_steps
+                                (tenant_id, case_id, template_step_id, sort_order, title,
+                                 description, category, owner, due_date, is_required)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                tenant_id, case_id, str(step["id"]), step["sort_order"],
+                                step["title"], step.get("description"),
+                                step["category"], step["owner"],
+                                due_date, step["is_required"],
+                            ),
+                        )
+
+                    return {
+                        "case_id": case_id,
+                        "employee_id": employee_id,
+                        "template_id": tmpl["id"],
+                        "template_name": tmpl["name"],
+                        "steps_created": len(t_steps),
+                    }
+        finally:
+            self._release(conn)
+
+    def update_onboarding_step(
+        self,
+        tenant_id: str,
+        step_id: str,
+        new_status: str,
+        completed_by_user_id: str,
+        notes: str | None,
+    ) -> dict:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Fetch the step to get its case_id and validate it belongs to the tenant
+                    cur.execute(
+                        "SELECT id, case_id, is_required FROM onboarding_case_steps WHERE tenant_id = %s AND id = %s",
+                        (tenant_id, step_id),
+                    )
+                    step_row = cur.fetchone()
+                    if step_row is None:
+                        raise ValueError(f"Step {step_id} not found.")
+                    case_id = str(step_row["case_id"])
+
+                    completed_at = "now()" if new_status == "completed" else "NULL"
+                    cur.execute(
+                        f"""
+                        UPDATE onboarding_case_steps
+                        SET status = %s,
+                            notes = COALESCE(%s, notes),
+                            completed_at = CASE WHEN %s = 'completed' THEN now() ELSE NULL END,
+                            completed_by_user_id = %s,
+                            updated_at = now()
+                        WHERE tenant_id = %s AND id = %s
+                        """,
+                        (new_status, notes, new_status, completed_by_user_id, tenant_id, step_id),
+                    )
+
+                    # Check if all required steps are now done → auto-complete case
+                    cur.execute(
+                        """
+                        SELECT
+                            COUNT(*) FILTER (WHERE is_required AND status NOT IN ('completed', 'skipped')) AS pending_required,
+                            COUNT(*) AS total
+                        FROM onboarding_case_steps
+                        WHERE tenant_id = %s AND case_id = %s
+                        """,
+                        (tenant_id, case_id),
+                    )
+                    check = cur.fetchone()
+                    case_auto_completed = False
+                    if check["pending_required"] == 0 and check["total"] > 0:
+                        cur.execute(
+                            """
+                            UPDATE onboarding_cases
+                            SET status = 'completed', completed_at = now(), updated_at = now()
+                            WHERE tenant_id = %s AND id = %s AND status = 'in_progress'
+                            """,
+                            (tenant_id, case_id),
+                        )
+                        case_auto_completed = cur.rowcount > 0
+
+                    return {
+                        "step_id": step_id,
+                        "new_status": new_status,
+                        "case_id": case_id,
+                        "case_auto_completed": case_auto_completed,
+                    }
+        finally:
+            self._release(conn)
+
+    def upsert_onboarding_template(
+        self,
+        tenant_id: str,
+        name: str,
+        description: str | None,
+        steps: list[dict],
+        set_as_default: bool,
+        created_by_user_id: str,
+        template_id: str | None = None,
+    ) -> dict:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    if template_id:
+                        # Update existing template metadata
+                        cur.execute(
+                            """
+                            UPDATE onboarding_templates
+                            SET name = %s, description = %s, updated_at = now()
+                            WHERE tenant_id = %s AND id = %s
+                            RETURNING id, name
+                            """,
+                            (name, description, tenant_id, template_id),
+                        )
+                        row = cur.fetchone()
+                        if row is None:
+                            raise ValueError(f"Template {template_id} not found.")
+                        tmpl_id = str(row["id"])
+                        tmpl_name = row["name"]
+                        # Delete old steps before inserting new ones
+                        cur.execute(
+                            "DELETE FROM onboarding_template_steps WHERE tenant_id = %s AND template_id = %s",
+                            (tenant_id, tmpl_id),
+                        )
+                    else:
+                        # Create new template
+                        cur.execute(
+                            """
+                            INSERT INTO onboarding_templates (tenant_id, name, description)
+                            VALUES (%s, %s, %s)
+                            RETURNING id, name
+                            """,
+                            (tenant_id, name, description),
+                        )
+                        row = cur.fetchone()
+                        tmpl_id = str(row["id"])
+                        tmpl_name = row["name"]
+
+                    # Optionally set this as the default (clear others first)
+                    if set_as_default:
+                        cur.execute(
+                            "UPDATE onboarding_templates SET is_default = FALSE WHERE tenant_id = %s",
+                            (tenant_id,),
+                        )
+                        cur.execute(
+                            "UPDATE onboarding_templates SET is_default = TRUE WHERE tenant_id = %s AND id = %s",
+                            (tenant_id, tmpl_id),
+                        )
+
+                    # Insert new steps
+                    for i, step in enumerate(steps):
+                        cur.execute(
+                            """
+                            INSERT INTO onboarding_template_steps
+                                (tenant_id, template_id, sort_order, title, description,
+                                 category, owner, due_offset_days, is_required)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                tenant_id, tmpl_id,
+                                step.get("sort_order", i + 1),
+                                step["title"],
+                                step.get("description"),
+                                step.get("category", "documentation"),
+                                step.get("owner", "hr"),
+                                step.get("due_offset_days", 1),
+                                step.get("is_required", True),
+                            ),
+                        )
+
+                    return {
+                        "template_id": tmpl_id,
+                        "name": tmpl_name,
+                        "steps_count": len(steps),
+                        "is_default": set_as_default,
+                    }
+        finally:
+            self._release(conn)
+
+    def create_employee_record(
+        self,
+        tenant_id: str,
+        full_name: str,
+        arabic_name,
+        position: str,
+        department: str,
+        employment_type: str,
+        start_date: str,
+        email: str,
+        notification_email,
+        basic_salary: float,
+        housing_allowance: float,
+        transport_allowance: float,
+        manager_code,
+        birth_date,
+        created_by_user_id: str,
+    ) -> dict:
+        conn = self._get_conn(tenant_id)
+        try:
+            with conn.cursor() as cur:
+                # Auto-generate employee_code: FT-YEAR-NNN (next unused number)
+                year = start_date[:4]
+                cur.execute(
+                    """
+                    SELECT employee_code FROM employees
+                    WHERE tenant_id = %s AND employee_code LIKE %s
+                    ORDER BY employee_code DESC LIMIT 1
+                    """,
+                    (tenant_id, f"FT-{year}-%"),
+                )
+                row = cur.fetchone()
+                if row:
+                    last_num = int(row[0].split("-")[-1])
+                    next_num = last_num + 1
+                else:
+                    next_num = 1
+                employee_code = f"FT-{year}-{next_num:03d}"
+
+                # Resolve manager UUID from manager_code if provided
+                manager_id = None
+                manager_name = None
+                if manager_code:
+                    cur.execute(
+                        "SELECT id, full_name FROM employees WHERE tenant_id=%s AND employee_code=%s",
+                        (tenant_id, manager_code),
+                    )
+                    mgr = cur.fetchone()
+                    if mgr:
+                        manager_id, manager_name = mgr[0], mgr[1]
+
+                total_salary = basic_salary + housing_allowance + transport_allowance
+
+                cur.execute(
+                    """
+                    INSERT INTO employees (
+                        tenant_id, employee_code, full_name, arabic_name,
+                        position, department, employment_type, start_date,
+                        email, notification_email,
+                        basic_salary, housing_allowance, transport_allowance, total_salary,
+                        manager_id, manager_name, birth_date,
+                        annual_leave_balance, currency
+                    ) VALUES (
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s,
+                        21, 'EGP'
+                    ) RETURNING id, employee_code, full_name, position, department,
+                                email, start_date, total_salary
+                    """,
+                    (
+                        tenant_id, employee_code, full_name, arabic_name,
+                        position, department, employment_type, start_date,
+                        email, notification_email,
+                        basic_salary, housing_allowance, transport_allowance, total_salary,
+                        manager_id, manager_name, birth_date,
+                    ),
+                )
+                rec = cur.fetchone()
+                conn.commit()
+                return {
+                    "employee_id": str(rec[0]),
+                    "employee_code": rec[1],
+                    "full_name": rec[2],
+                    "position": rec[3],
+                    "department": rec[4],
+                    "email": rec[5],
+                    "start_date": str(rec[6]),
+                    "total_salary": float(rec[7]),
+                }
+        finally:
+            self._release(conn)
