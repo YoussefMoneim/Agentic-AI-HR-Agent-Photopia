@@ -108,7 +108,8 @@ class SharePointConnector:
         self._graph_client = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        self._token_cache_path = Path("/tmp/sharepoint_token_cache.json")
+        self._token_cache_path = Path("/app/sharepoint_cache/sharepoint_token_cache.json")
+        os.makedirs(self._token_cache_path.parent, exist_ok=True)
 
     # ------------------------------------------------------------------ #
     # Public interface                                                      #
@@ -197,9 +198,12 @@ class SharePointConnector:
                     _log.info("SharePoint: authenticated via client credentials")
                     return result["access_token"]
                 else:
-                    error = result.get("error_description", "unknown") if result else "no result"
+                    error = result.get("error", "unknown") if result else "no result"
+                    error_desc = result.get("error_description", "") if result else ""
                     _log.warning(
-                        "Client credentials failed (admin consent may be pending): %s", error
+                        "SharePoint: client credentials failed (error=%s): %s — "
+                        "falling back to device code flow",
+                        error, error_desc
                     )
 
             # Fallback: device code flow (interactive, no admin consent needed)
@@ -210,7 +214,7 @@ class SharePointConnector:
                 token_cache=self._load_token_cache(),
             )
 
-            scopes = ["Files.Read", "Sites.Read.All", "offline_access"]
+            scopes = ["Files.Read", "Sites.Read.All"]
 
             # Try silent auth from cache first
             accounts = app.get_accounts()
