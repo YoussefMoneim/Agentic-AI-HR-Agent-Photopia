@@ -31,6 +31,7 @@ services:
         - ./backend/documents:/app/documents
         - ./backend/policies:/app/policies
         - ./backend/scripts:/app/scripts
+        - ./backend/.sharepoint_cache:/app/sharepoint_cache
 
 volumes:
   postgres_data:

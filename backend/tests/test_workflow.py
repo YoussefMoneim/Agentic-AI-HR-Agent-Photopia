@@ -201,9 +201,11 @@ class TestWorkflowSync:
 
     def _submit_and_get_lr_id(self, registry, ctx):
         emp_ctx = ctx(role="employee")
+        start = date.today() + timedelta(days=2)
+        end = start + timedelta(days=1)
         result = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-07", "end_date": "2026-07-08",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "sync test"},
             emp_ctx,
         )

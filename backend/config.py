@@ -88,6 +88,15 @@ ODOO_USERNAME: str = os.getenv("ODOO_USERNAME", "")
 ODOO_PASSWORD: str = os.getenv("ODOO_PASSWORD", "")
 ODOO_ENABLED: bool = os.getenv("ODOO_ENABLED", "false").lower() == "true"
 
+# ── Microsoft Graph / SharePoint connector ───────────────────────────────────
+# Leave SHAREPOINT_SITE_URL unset to keep the connector disabled (fail-safe by default).
+AZURE_CLIENT_ID: str = os.getenv("AZURE_CLIENT_ID", "")
+AZURE_TENANT_ID: str = os.getenv("AZURE_TENANT_ID", "")
+AZURE_CLIENT_SECRET: str = os.getenv("AZURE_CLIENT_SECRET", "")
+SHAREPOINT_SITE_URL: str = os.getenv("SHAREPOINT_SITE_URL", "")  # e.g. https://fotopiatech.sharepoint.com/sites/HRPolicies
+SHAREPOINT_FOLDER_PATH: str = os.getenv("SHAREPOINT_FOLDER_PATH", "/HR Policies")  # folder within the site
+SHAREPOINT_POLL_INTERVAL_SECONDS: int = int(os.getenv("SHAREPOINT_POLL_INTERVAL_SECONDS", "300"))  # 5 minutes
+
 # ── Leave calendar ────────────────────────────────────────────────────────────
 # Egypt's official public holidays for 2026.
 # Islamic holidays (Eid, Islamic New Year, Prophet's Birthday) are lunar-based

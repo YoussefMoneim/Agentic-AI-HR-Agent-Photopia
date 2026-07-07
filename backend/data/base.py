@@ -347,21 +347,6 @@ class DataSource(ABC):
 
         Returns {events, daily_summary, departments, total_employees_in_scope}."""
 
-    # ─── RAG / policy search ───────────────────────────────────────────────────
-
-    @abstractmethod
-    def search_policy(
-        self,
-        tenant_id: str,
-        query: str,
-        caller_roles: list[str],
-        limit: int = 5,
-    ) -> list[dict]:
-        """Full-text search over private_document_chunks.
-        Pre-filters allowed_roles && caller_roles BEFORE text search — never post-filter.
-        classified_at IS NOT NULL guard ensures quarantine chunks are never returned.
-        Returns list of {document_id, chunk_index, content, source_file, sensitivity}."""
-
     # ─── Email agent ──────────────────────────────────────────────────────────
 
     @abstractmethod

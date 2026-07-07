@@ -253,6 +253,36 @@ export async function getRecentDocuments() {
   return res.json()
 }
 
+// ── Knowledge base / SharePoint sync ────────────────────────────────────────────
+
+export async function getKnowledgeDocuments() {
+  const res = await fetch(`${API_URL}/api/knowledge/documents`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`Knowledge documents ${res.status}`)
+  return res.json()
+}
+
+export async function getSharePointStatus() {
+  const res = await fetch(`${API_URL}/api/knowledge/sharepoint/status`, {
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(`SharePoint status ${res.status}`)
+  return res.json()
+}
+
+export async function triggerSharePointSync() {
+  const res = await fetch(`${API_URL}/api/knowledge/sharepoint/sync`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Sync failed (${res.status})`)
+  }
+  return res.json()
+}
+
 export async function getLeaveCalendar(year, month, department = null) {
   const params = new URLSearchParams({ year, month })
   if (department) params.append('department', department)
