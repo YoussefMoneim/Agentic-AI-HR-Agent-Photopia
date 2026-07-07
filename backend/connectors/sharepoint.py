@@ -149,6 +149,7 @@ class SharePointConnector:
         conn = psycopg2.connect(self._db_url)
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                self._set_tenant(cur, self._fotopia_tenant_id)
                 cur.execute(
                     """
                     SELECT site_url, folder_path, last_synced_at,
@@ -509,10 +510,17 @@ class SharePointConnector:
     # Database helpers                                                      #
     # ------------------------------------------------------------------ #
 
+    def _set_tenant(self, cur, tenant_id: str) -> None:
+        # Superusers bypass RLS even with FORCE — SET ROLE fotopia_app first,
+        # matching the pattern in data/postgresql.py / knowledge/pgvector_kb.py.
+        cur.execute("SET ROLE fotopia_app")
+        cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
+
     def _get_delta_link(self) -> Optional[str]:
         conn = psycopg2.connect(self._db_url)
         try:
             with conn.cursor() as cur:
+                self._set_tenant(cur, self._fotopia_tenant_id)
                 cur.execute(
                     """
                     SELECT delta_link FROM sharepoint_sync_state
@@ -533,6 +541,7 @@ class SharePointConnector:
         conn = psycopg2.connect(self._db_url)
         try:
             with conn.cursor() as cur:
+                self._set_tenant(cur, self._fotopia_tenant_id)
                 cur.execute(
                     """
                     INSERT INTO sharepoint_sync_state

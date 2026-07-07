@@ -23,8 +23,10 @@ from tools.base import ToolContext
 from tools.leave import send_leave_decision_email
 from tools.registry import ToolRegistry, build_registry
 from workflow.constraints import evaluate_constraints
+from connectors.sharepoint import init_sharepoint_connector, get_sharepoint_connector
 
 logging.basicConfig(level=logging.INFO)
+_log = logging.getLogger(__name__)
 
 
 class _SuppressPollLog(logging.Filter):
@@ -60,6 +62,13 @@ async def lifespan(app: FastAPI):
         _fotopia_tenant_id = str(row[0])
     conn.close()
 
+    connector = init_sharepoint_connector(fotopia_tenant_id=_fotopia_tenant_id)
+    if connector:
+        connector.start()
+        _log.info("SharePoint connector started")
+    else:
+        _log.info("SharePoint connector disabled (SHAREPOINT_SITE_URL not configured)")
+
     _registry = build_registry(_data_source, audit_logger)
 
     from services.email_listener import run_email_listener
@@ -75,6 +84,10 @@ async def lifespan(app: FastAPI):
         await _listener_task
     except asyncio.CancelledError:
         pass
+
+    connector = get_sharepoint_connector()
+    if connector:
+        connector.stop()
 
 
 app = FastAPI(title="Fotopia HR Agent", version="0.1.0", lifespan=lifespan)
@@ -1293,6 +1306,58 @@ def get_recent_documents(authorization: str | None = Header(default=None)):
         return {"documents": rows}
     finally:
         conn.close()
+
+
+@app.post("/api/knowledge/sharepoint/sync")
+def trigger_sharepoint_sync(authorization: str | None = Header(default=None)):
+    """Manually trigger a SharePoint sync. HR manager only."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    if ctx.role not in ("hr_manager", "admin"):
+        raise HTTPException(status_code=403, detail="HR manager or admin access required")
+
+    connector = get_sharepoint_connector()
+    if not connector:
+        raise HTTPException(
+            status_code=503,
+            detail="SharePoint connector not configured. Set SHAREPOINT_SITE_URL in environment."
+        )
+    try:
+        result = connector.trigger_sync()
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/knowledge/sharepoint/status")
+def get_sharepoint_status(authorization: str | None = Header(default=None)):
+    """Get current SharePoint sync status. HR manager only."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    if ctx.role not in ("hr_manager", "admin"):
+        raise HTTPException(status_code=403, detail="HR manager or admin access required")
+
+    connector = get_sharepoint_connector()
+    if not connector:
+        return {"status": "disabled", "message": "SharePoint connector not configured"}
+    return {"status": "ok", "sync_state": connector.get_status()}
+
+
+@app.get("/api/knowledge/documents")
+def list_knowledge_documents(authorization: str | None = Header(default=None)):
+    """List all documents currently in the knowledge base. HR manager only."""
+    if not _fotopia_tenant_id:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+    if ctx.role not in ("hr_manager", "admin"):
+        raise HTTPException(status_code=403, detail="HR manager or admin access required")
+
+    from knowledge.factory import get_knowledge_base
+    kb = get_knowledge_base()
+    documents = kb.list_documents(tenant_id=ctx.tenant_id)
+    return {"status": "ok", "documents": documents, "count": len(documents)}
 
 
 @app.get("/documents/{doc_id}")
