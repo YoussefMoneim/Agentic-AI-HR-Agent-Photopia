@@ -1,4 +1,9 @@
 """
+DEPRECATED: This script ingests from the local backend/policies/ directory.
+SharePoint is now the source of truth for policy documents.
+Use the SharePoint connector instead: POST /api/knowledge/sharepoint/sync
+This script is kept for emergency local ingestion only.
+
 Ingestion script: walks backend/policies/, chunks documents,
 generates Voyage AI embeddings, and stores in private_document_chunks.
 

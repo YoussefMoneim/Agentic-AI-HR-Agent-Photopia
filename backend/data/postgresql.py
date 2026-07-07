@@ -1857,45 +1857,6 @@ class PostgreSQLDataSource(DataSource):
         finally:
             self._release(conn)
 
-    # ─── RAG / policy search ───────────────────────────────────────────────────
-
-    def search_policy(
-        self,
-        tenant_id: str,
-        query: str,
-        caller_roles: list[str],
-        limit: int = 5,
-    ) -> list[dict]:
-        # plainto_tsquery uses AND between all terms — a synonym not in the text
-        # causes the whole query to miss. Instead, stem the query with to_tsvector
-        # (which handles stop-word removal and stemming) and join the resulting
-        # lexemes with OR (|) so any matching term is a hit.
-        conn = self._conn()
-        try:
-            self._set_tenant(conn, tenant_id)
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    WITH q AS (
-                        SELECT string_agg(lexeme, ' | ') AS or_query
-                        FROM unnest(to_tsvector('english', %s))
-                    )
-                    SELECT document_id, chunk_index, content, source_file, sensitivity
-                    FROM private_document_chunks, q
-                    WHERE q.or_query IS NOT NULL
-                      AND tenant_id = %s
-                      AND classified_at IS NOT NULL
-                      AND allowed_roles && %s::text[]
-                      AND content_tsv @@ to_tsquery('english', q.or_query)
-                    ORDER BY ts_rank(content_tsv, to_tsquery('english', q.or_query)) DESC
-                    LIMIT %s
-                    """,
-                    (query, tenant_id, caller_roles, limit),
-                )
-                return [dict(r) for r in cur.fetchall()]
-        finally:
-            self._release(conn)
-
     # ─── Email agent ──────────────────────────────────────────────────────────
 
     def get_employee_by_email(self, tenant_id: str, email: str) -> dict | None:

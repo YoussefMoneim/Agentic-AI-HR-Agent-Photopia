@@ -3,6 +3,7 @@ import ChatInterface from './components/ChatInterface.jsx'
 import AuditLog from './components/AuditLog.jsx'
 import ApprovalInbox from './components/ApprovalInbox.jsx'
 import DocumentLibrary from './components/DocumentLibrary.jsx'
+import KnowledgeSyncPanel from './components/KnowledgeSyncPanel.jsx'
 import LeaveCalendar from './components/LeaveCalendar.jsx'
 import LoginPage from './components/LoginPage.jsx'
 import { getStoredUser, logout } from './api.js'
@@ -19,6 +20,8 @@ function getInitials(name) {
 }
 
 const HR_ROLES = new Set(['hr_staff', 'hr_manager', 'admin'])
+// Matches the backend's actual restriction on /api/knowledge/* — hr_manager/admin only, not hr_staff.
+const KNOWLEDGE_SYNC_ROLES = new Set(['hr_manager', 'admin'])
 
 export default function App() {
   const [user, setUser] = useState(() => getStoredUser())
@@ -107,6 +110,7 @@ export default function App() {
             { key: 'documents', label: 'Documents' },
             { key: 'calendar',  label: 'Calendar' },
             ...(HR_ROLES.has(user.role) ? [{ key: 'inbox', label: 'Inbox', badge: pendingCount }] : []),
+            ...(KNOWLEDGE_SYNC_ROLES.has(user.role) ? [{ key: 'knowledge', label: 'Knowledge Sync' }] : []),
           ].map(tab => (
             <button
               key={tab.key}
@@ -197,6 +201,11 @@ export default function App() {
           {HR_ROLES.has(user.role) && (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'inbox' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'inbox' ? 'auto' : 'none' }}>
               <ApprovalInbox visible={rightPanel === 'inbox'} onCountChange={setPendingCount} role={user.role} />
+            </div>
+          )}
+          {KNOWLEDGE_SYNC_ROLES.has(user.role) && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', visibility: rightPanel === 'knowledge' ? 'visible' : 'hidden', pointerEvents: rightPanel === 'knowledge' ? 'auto' : 'none' }}>
+              <KnowledgeSyncPanel />
             </div>
           )}
         </div>
