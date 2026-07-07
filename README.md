@@ -1,139 +1,217 @@
 # Fotopia HR Agent
 
-An enterprise SaaS AI agent platform that automates HR tasks for Fotopia Technologies' clients (banks, government bodies, healthcare organizations) across Egypt and the MENA region. The agent is powered by Claude (Anthropic) and built on a strict security-first architecture designed for regulated industries.
+**Enterprise AI operations platform — HR module — WIN Holding Group pilot**
+
+> "Enterprise Intelligence. Agentic Work. Governed Execution." — Raef Eid, CEO Fotopia Technologies
 
 ---
 
-## What it does
+## What It Is
 
-A chat-first HR assistant that lets HR managers and employees get things done without navigating legacy systems. The agent understands natural language, calls the right tools, audits every action, and never invents numbers or document content.
+The Fotopia HR Agent is a production-grade AI system that automates the full HR operations lifecycle for enterprise clients. It is the first module of **Zumra** — Fotopia's broader enterprise AI platform — and serves as the proof of concept for an agentic shared-services architecture that mirrors how companies actually work.
 
-**Current capabilities:**
+Employees interact with it in plain Arabic or English through a chat interface or email. The system understands their request, validates it against the company's leave policy, routes it to the right manager for approval, syncs with the ERP automatically, and notifies everyone involved. Every action is audited. Nothing changes without a human decision.
 
-| Category | Tools |
+Built during the Fotopia 2026 internship. Demonstrated to CEO Raef Eid and WIN Holding Group on July 5, 2026.
+
+---
+
+## Current Status
+
+**296 tests passing. 0 failures.**
+
+| Layer | Status |
 |---|---|
-| Employee data | Read profile, search, list employees, full summary with years-of-service |
-| Leave management | Check balance, submit request, approve/reject via chat or email, cancel, view queue |
-| Document generation | Salary certificate, To-Whom-It-May-Concern letter, Experience certificate (bilingual, fpdf) |
-| Calculations | End-of-service gratuity (Egyptian Labor Law, deterministic Python — never the LLM) |
-| Document library | Upload/paste documents, content sensitivity scanning, HITL share-approval flow |
-| Audit trail | Every tool call, sensitivity flag, and human share decision is logged with actor identity |
+| Executor (leave lifecycle, email agent, Odoo sync, audit trail) | ✅ Complete |
+| Vector knowledge base (semantic policy search, Arabic + English) | ✅ Complete |
+| SharePoint auto-sync connector | 🔄 In progress |
+| Email thread context memory | 🔄 In progress |
+
+---
+
+## What It Does
+
+### Leave Management (18 Leave Types)
+- Submit leave via chat or email in natural language
+- Full WIN Holding policy enforcement: notice periods, service minimums, career caps, department concurrent limits (25%), probation checks
+- Retroactive submission allowed for sick/emergency/funeral (UAE labor law compliant)
+- Manager approval via one-click email link, email reply, or approval inbox UI
+- Leave cancellation flow with manager approval
+- Egypt work week (Sun–Thu) with public holiday exclusions
+
+### Email Agent (Bidirectional)
+- Employees email `hr.agent.fotopia@gmail.com` directly
+- Claude Haiku classifies intent with confidence scoring
+- Natural language date extraction ("first two weeks of August")
+- Auto-reply with policy-compliant response in ~15 seconds
+- Rate limited: 10 requests/hour per employee
+
+### Odoo ERP Integration
+- Approved leave auto-creates `hr.leave` record in Odoo 16
+- Cancelled leave deleted via refuse → draft → unlink sequence
+- Non-blocking: Odoo failures never block approvals
+- Protocol: XML-RPC (built-in, no paid API required)
+
+### Notifications
+- Submission confirmation email to employee
+- Branded manager approval email with one-click Approve/Reject
+- Branded decision email to employee (✅/❌)
+- HR notification with compliance checklist and TimeLOG action items
+- All paths produce identical branded templates regardless of submission channel
+
+### Vector Knowledge Base (Feeder Agent)
+- **voyage-multilingual-2** embeddings (1024 dimensions, Arabic + English)
+- pgvector on PostgreSQL — same database, no additional infrastructure
+- Hybrid search: vector similarity + full-text fallback (never breaks)
+- 95 chunks ingested from WIN Holding policy documents
+- Cross-lingual retrieval confirmed: Arabic query → correct English policy section
+- Access control: `allowed_roles[]` enforced in SQL pre-filter (not post-filter)
+- Graceful degradation on Voyage AI API failure
+
+### Document & HR Tools
+- Salary certificate generation (branded PDF)
+- Experience certificate generation
+- Document sensitivity scanning (OCR + LLM verification on excerpt only)
+- Team calendar view
+- Excel export: Leave Register, Balance Summary, Monthly Summary
+- Sick leave abuse detection
+- Documentation gate before submitting high-sensitivity leave types
 
 ---
 
 ## Architecture
+DESIGN LAYER (Feeder Agent)
+Policy documents (PDF/MD)
+↓ ingest_policies.py
+Voyage AI voyage-multilingual-2
+↓ 1024-dim embeddings
+pgvector (private_document_chunks)
+↓ KnowledgeBase.search()
+EXECUTOR LAYER (HR Agent)
+Employee (Chat UI / Email)
+↓ Natural language
+FastAPI Backend  →  JWT auth
+↓
+Claude Sonnet 4.5  →  Tool selection
+↓
+Constraint Engine  →  Policy enforcement (deterministic Python)
+↓
+PostgreSQL (RLS FORCE)  →  Leave request stored
+↓
+Office 365 SMTP  →  Manager notified
+↓
+Manager approves (email / UI)
+↓
+Odoo 16 (XML-RPC)  →  ERP updated
+↓
+Audit Log  →  Every step recorded
 
-```
-React frontend  →  FastAPI  →  ToolRegistry (security gateway)  →  Tools  →  PostgreSQL
-                                      ↑
-                               ToolContext (tenant_id, user_id, role, employee_code)
-                                      ↑
-                               JWT auth (build_context)
-```
+### Security Model
 
-**Core security principles:**
+Three independent enforcement layers — all must pass for any write action:
 
-- **Policy before prompt** — `ToolRegistry` filters the tool list by role *before* the LLM call. Claude never sees tools it cannot use.
-- **Double-check at execution** — `ToolRegistry.execute()` re-validates role at call time, then audits the result.
-- **Row-level access** — HR roles see all employees; an employee sees only their own record. Enforced in every tool via `ToolContext`.
-- **Deterministic math** — All salary/gratuity calculations are pure Python. The LLM never does arithmetic.
-- **LLM-free document content** — fpdf templates are hardcoded; content is slot-filled from the database. The LLM never invents document text.
-- **Audit everything** — Every tool call, appropriateness flag, and human share decision is written to `audit_log` and `workflow_events`, never bypassed.
+1. **API route** — JWT HS256 validated, role extracted from token claims
+2. **Tool registry** — Role checked against `tool.spec.allowed_roles` before execution. Denied attempts audited.
+3. **Database RLS** — PostgreSQL `FORCE ROW LEVEL SECURITY` on every tenant table. Bypassed by nothing.
 
----
-
-## Document sensitivity scanner (added this release)
-
-Demonstrates the platform's content-awareness layer, which will back the RAG/knowledge layer in Phase 3.
-
-**How it works:**
-
-1. **Upload or paste** any document (PDF, DOCX, TXT, or pasted text) into the Document Library tab.
-2. **Regex scan** — deterministic patterns flag salary figures, national IDs, medical data, performance reviews, and financial data.
-3. **LLM verification** — only the 200-character context window around each match is sent to `claude-haiku-4-5` to filter false positives (e.g. "EGP 850 team lunch" vs "Basic salary EGP 25,000"). Fails closed — if the LLM is unavailable, the content is treated as sensitive.
-4. **Share flow** — click Share on any document, pick a recipient from the people-picker (like SharePoint/OneDrive), and the system checks whether the content is appropriate for that recipient's role.
-5. **HITL decision** — if a flag fires, the user sees the reason and must explicitly choose to proceed or cancel. Either way, the decision is logged in the Audit Log tab with the actor's name and timestamp.
-
-**What this proves for enterprise customers:**
-
-- The system scans *content*, not labels — it catches a salary figure in a document that was uploaded without any classification.
-- The LLM is used only for verification on a minimal excerpt, never for the access-control decision itself.
-- Every human override is auditable with identity and timestamp.
-- The flag is never a block — HITL means the human always has the final word.
-
----
-
-## Role model
-
-| Role | What they can do |
+| Role | Access |
 |---|---|
-| `employee` | Check own leave balance, submit leave, view own documents |
-| `hr_staff` | All of the above for any employee + read-only tools |
-| `hr_manager` | All tools including document generation and leave approval |
-| `admin` | Full access |
-
-Row-level enforcement: `_can_access_employee()` inside every tool — HR roles see everyone, an employee sees only their own record.
+| `employee` | Own data only |
+| `hr_staff` | Team data, read-only tools |
+| `hr_manager` | Full HR access, approve/reject, export, ingest documents |
+| `admin` | System admin, all access |
 
 ---
 
-## Running locally
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Frontend | React 18 + Vite 5.x, TypeScript, Tailwind CSS |
+| Backend | FastAPI 0.115.x, Python 3.11, Uvicorn |
+| Database | PostgreSQL 15 with pgvector 0.8.3 |
+| AI Model (Chat) | Claude Sonnet 4.5 (Anthropic) |
+| AI Model (Email) | Claude Haiku 4.5 |
+| Embeddings | Voyage AI voyage-multilingual-2 (1024 dims) |
+| Agent Framework | LangGraph |
+| ERP | Odoo 16 via XML-RPC |
+| Email Send | Office 365 SMTP |
+| Email Receive | Gmail IMAP |
+| Containers | Docker Compose 2.x |
+| Auth | JWT HS256 + bcrypt |
+| Testing | pytest — 296 tests, 0 failures |
+
+---
+
+## Running Locally
 
 ```bash
-cp .env.example .env          # add ANTHROPIC_API_KEY
-docker compose up             # starts Postgres + FastAPI (schema + seed auto-load)
-curl localhost:8000/health
+# Clone
+git clone https://github.com/YoussefMoneim/Agentic-AI-HR-Agent-Photopia.git
+cd Agentic-AI-HR-Agent-Photopia
+
+# Add .env file (obtain from team — not in repo)
+
+# Build and start
+docker compose build backend
+docker compose up -d
 
 # Frontend
-cd frontend && npm install && npm run dev   # http://localhost:5173
+cd frontend && npm install && npm run dev
+# → http://localhost:5173
 
-# Talk to the agent
-curl -X POST localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Generate a salary certificate for Saif Ahmed for bank account opening"}'
+# Seed vector knowledge base (once after setup)
+docker exec fotopia-hr-agent-backend-1 python /app/scripts/ingest_policies.py
 
-# Watch the audit log live
-watch -n 2 'docker exec fotopia-hr-agent-db-1 psql -U fotopia -d fotopia_hr \
-  -c "SELECT tool_name, actor_role, outcome, result_summary, created_at \
-      FROM audit_log ORDER BY created_at DESC LIMIT 10;"'
+# Run tests
+docker exec fotopia-hr-agent-backend-1 python -m pytest tests/ -q
+# Expected: 296 passed, 0 failed
+
+# Demo reset (before any demo)
+docker exec fotopia-hr-agent-backend-1 python /app/scripts/demo_reset.py
 ```
 
-**Demo accounts (development only):**
+---
+
+## Demo Accounts
 
 | Name | Email | Password | Role |
 |---|---|---|---|
-| Nourhan Hosny | hr.agent.fotopia@gmail.com | demo123 | HR Manager |
-| Saif Ahmed Hassan | saif.hassan@fotopia.ai | demo123 | Employee |
-| Omar Alsayed | omar.alsayed@fotopia.ai | demo123 | Employee |
+| Youssef Abdelmoneim | i-youssef.abdelmoneim@fotopiatech.com | demo123 | Employee |
+| Saif Ahmed | i-saif.ahmed@fotopiatech.com | demo123 | Employee |
+| Noura Al Rashidi | noura.rashidi@fotopiatech.com | demo123 | HR Manager |
+| Khalid Al Hashmi | khalid.hashmi@fotopiatech.com | demo123 | Manager |
+
+**HR Inbox:** hr.agent.fotopia@gmail.com  
+**System email:** fotoagent@fotopiatech.com  
+**Odoo staging:** winholding-erp-winholding-stage-34182670.dev.odoo.com
 
 ---
 
-## Tech stack
+## Roadmap
 
-| Layer | Choice |
-|---|---|
-| LLM | Claude Sonnet 4.5 (Anthropic SDK, swappable via `LLM_PROVIDER` env var) |
-| Backend | Python 3.11, FastAPI, psycopg2 |
-| Database | PostgreSQL 15 with per-tenant RLS |
-| Document gen | fpdf2 |
-| Frontend | React 18, Vite |
-| Auth | JWT (HS256), bcrypt |
-| Containers | Docker Compose |
-
----
-
-## What's next
-
-- **Phase 1.5** — CI guardrail asserting RLS is enabled and forced on every tenant table; rename `MockDataSource` → `PostgreSQLDataSource`
-- **Phase 2** — Redis session history, real JWT replace the `build_context()` stub, onboarding document-gen tools
-- **Phase 3** — pgvector RAG with metadata pre-filter (tenant_id + allowed_roles before semantic search), audit log hash-chaining + WORM mirror
-- **Phase 4** — "Jarvis" proactive layer: daily briefing → goal tracking → assisted execution
+| Block | Status | Description |
+|---|---|---|
+| 0 — Executor Layer | ✅ Complete | Full HR agent, leave lifecycle, email agent, Odoo sync |
+| 1 — Feeder Agent Phase 1 | ✅ Complete | Vector knowledge base, semantic search, policy ingestion |
+| 2 — External Auto-Sync | 🔄 In Progress | SharePoint connector, email thread memory |
+| 3 — Agent Memory & Autonomy | 📋 Planned | Short/long-term memory, ReAct tool selection |
+| 4 — Five-File Agent Structure | 📋 Planned | Identity, role, skills, scheduler, memory |
+| 5 — Second Agent | 📋 Planned | Finance agent — proves architecture generalizes |
+| 6 — DigitizeMe Integration | 📋 Planned | Auto-sync from Fotopia content platform |
+| 7 — Production Hardening | 📋 Planned | Azure AI Search, Nuxeo, M365 OAuth2 |
 
 ---
 
 ## Team
 
-- **Youssef (Joe) Abdelmoneim** — Engineering (Computer Engineering, AUS, AI/ML intern)
-- **Dr. Ahmed El-Yazbi** — R&D AI Director, technical stakeholder
-- **Raef Eid** — Founder / chief software architect
-- **Nourhan Hosny** — HR Project Lead, first pilot user
-- **Fotopia Technologies** — Cairo, under WIN Holding Group
+| Person | Role |
+|---|---|
+| Youssef Abdelmoneim | AI Engineering Intern — Computer Engineering, AUS 2027 |
+| Saif Ahmed | AI Engineering Intern — Computer Engineering, University of Sharjah |
+| Dr. Ahmed El-Yazbi | Technical Supervisor — Fotopia Technologies |
+| Raef Eid | CEO — Fotopia Technologies / WIN Holding Group |
+
+**Organization:** Fotopia Technologies — WIN Holding Group  
+**Pilot client:** WIN Holding Group  
+**Started:** June 2026 | **Demo:** July 5, 2026
