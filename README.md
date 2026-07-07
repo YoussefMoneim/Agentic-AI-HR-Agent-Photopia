@@ -81,13 +81,18 @@ Built during the Fotopia 2026 internship. Demonstrated to CEO Raef Eid and WIN H
 
 ## Architecture
 DESIGN LAYER (Feeder Agent)
+
 Policy documents (PDF/MD)
 ↓ ingest_policies.py
+
 Voyage AI voyage-multilingual-2
 ↓ 1024-dim embeddings
+
 pgvector (private_document_chunks)
 ↓ KnowledgeBase.search()
+
 EXECUTOR LAYER (HR Agent)
+
 Employee (Chat UI / Email)
 ↓ Natural language
 FastAPI Backend  →  JWT auth
