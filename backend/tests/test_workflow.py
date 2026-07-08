@@ -28,21 +28,21 @@ import config
 from tests.conftest import get_pending_days
 
 
-def _two_consecutive_working_days(min_offset: int = 2):
-    """Find two consecutive working days at least min_offset days out.
-    Egypt work week is Sun-Thu (config.EGYPT_WEEKEND_DAYS); a naive
-    date.today() + timedelta(days=N) can land on Friday/Saturday depending
-    on which day "today" happens to be, so scan forward for a pair that's
-    guaranteed to both be working days regardless of drift."""
+def _working_days_from_today(n: int) -> date:
+    """Return the date that is n working days from today.
+    Matches tools.leave._add_working_days()'s exact locale rules (Egypt
+    work week via config.EGYPT_WEEKEND_DAYS, config.EGYPT_PUBLIC_HOLIDAYS_2026)
+    so test dates satisfy the same notice-period check the tool enforces,
+    regardless of which day "today" happens to be."""
     weekend = set(getattr(config, "EGYPT_WEEKEND_DAYS", [4, 5]))
     holidays = {date.fromisoformat(h) for h in getattr(config, "EGYPT_PUBLIC_HOLIDAYS_2026", [])}
-    d = date.today() + timedelta(days=min_offset)
-    while True:
-        nxt = d + timedelta(days=1)
-        if (d.weekday() not in weekend and d not in holidays
-                and nxt.weekday() not in weekend and nxt not in holidays):
-            return d, nxt
+    d = date.today()
+    count = 0
+    while count < n:
         d += timedelta(days=1)
+        if d.weekday() not in weekend and d not in holidays:
+            count += 1
+    return d
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -218,7 +218,8 @@ class TestWorkflowSync:
 
     def _submit_and_get_lr_id(self, registry, ctx):
         emp_ctx = ctx(role="employee")
-        start, end = _two_consecutive_working_days(2)
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=1)
         result = registry.execute(
             "submit_leave_request",
             {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
