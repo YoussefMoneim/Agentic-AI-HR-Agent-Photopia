@@ -20,6 +20,8 @@ Run inside Docker:
     docker exec fotopia-hr-agent-backend-1 python -m pytest tests/test_win_policy.py -v --tb=short
 """
 
+from unittest.mock import patch
+
 import psycopg2
 import pytest
 from datetime import date, timedelta
@@ -30,6 +32,22 @@ from tools.leave import (
     CheckLeaveEligibilityTool,
     SubmitLeaveRequestTool,
 )
+from workflow.policy_engine import PolicyDecision
+
+
+@pytest.fixture(autouse=True)
+def mock_policy_engine_uncertain():
+    """This file tests the hardcoded constraint fallback path deterministically.
+    PolicyEngine's live LLM path is tested separately (mocked) in
+    test_policy_engine.py and validated manually against the real knowledge
+    base — forcing certain=False here means CheckLeaveEligibilityTool always
+    falls through to checks #6/#7, so these tests don't depend on live LLM
+    wording."""
+    with patch(
+        "workflow.policy_engine.PolicyEngine.evaluate_hajj_eligibility",
+        return_value=PolicyDecision(certain=False),
+    ):
+        yield
 
 # ─── Date constants ────────────────────────────────────────────────────────────
 # Today = 2026-06-26 (Friday). Egypt weekend = Fri (4) + Sat (5).
