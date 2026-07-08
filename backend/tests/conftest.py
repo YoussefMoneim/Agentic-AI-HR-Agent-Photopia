@@ -14,6 +14,7 @@ Key seeded data:
 """
 import os
 import sys
+from datetime import date, timedelta
 
 # Add backend root to sys.path so imports resolve when running from the container
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -368,3 +369,21 @@ def get_pending_days(conn, tenant_id: str, employee_code: str,
 def get_used_days(conn, tenant_id: str, employee_code: str,
                   leave_type_code: str, year: int = 2026) -> float:
     return _balance_col(conn, tenant_id, employee_code, leave_type_code, "used_days", year)
+
+
+def future_working_date(n: int) -> date:
+    """
+    Return the date that is n working days from today.
+    Uses Egypt's work week (config.EGYPT_WEEKEND_DAYS, default Friday+Saturday)
+    and excludes config.EGYPT_PUBLIC_HOLIDAYS_2026 — same locale rules as
+    workflow.constraints.count_working_days().
+    """
+    weekend = set(getattr(config, "EGYPT_WEEKEND_DAYS", [4, 5]))
+    holidays = {date.fromisoformat(d) for d in getattr(config, "EGYPT_PUBLIC_HOLIDAYS_2026", [])}
+    current = date.today()
+    count = 0
+    while count < n:
+        current += timedelta(days=1)
+        if current.weekday() not in weekend and current not in holidays:
+            count += 1
+    return current
