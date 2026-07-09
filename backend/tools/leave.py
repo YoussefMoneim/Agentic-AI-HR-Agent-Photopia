@@ -380,11 +380,11 @@ class CheckLeaveEligibilityTool(Tool):
         # 2. Notice period check
         if start_date and not is_time_based:
             if leave_type_code == "annual":
-                # WIN policy HR/BTE 001/7-2025: 24h notice for 2-3 day requests;
+                # WIN policy HR/BTE 001/7-2025 (updated): 48h notice for 2-3 day requests;
                 # 7 working days notice for requests longer than 3 days.
                 if days_requested <= 3:
-                    min_start = today + timedelta(days=1)
-                    notice_desc = "1 calendar day (24h)"
+                    min_start = _add_working_days(today, 2)
+                    notice_desc = "2 working days (48 hours)"
                 else:
                     min_start = _add_working_days(today, 7)
                     notice_desc = "7 working days"

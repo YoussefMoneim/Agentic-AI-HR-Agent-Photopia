@@ -144,7 +144,7 @@ class TestCorrelationTokenResume:
 
     def _submit_and_get_token(self, registry, ctx, database_url, tenant_id):
         emp_ctx = ctx(role="employee")
-        start = date.today() + timedelta(days=2)
+        start = _working_days_from_today(2)
         end = start + timedelta(days=2)
         result = registry.execute(
             "submit_leave_request",
