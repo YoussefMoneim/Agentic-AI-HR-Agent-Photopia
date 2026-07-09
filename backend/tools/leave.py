@@ -380,11 +380,11 @@ class CheckLeaveEligibilityTool(Tool):
         # 2. Notice period check
         if start_date and not is_time_based:
             if leave_type_code == "annual":
-                # WIN policy HR/BTE 001/7-2025: 24h notice for 2-3 day requests;
+                # WIN policy HR/BTE 001/7-2025 (updated): 48h notice for 2-3 day requests;
                 # 7 working days notice for requests longer than 3 days.
                 if days_requested <= 3:
-                    min_start = today + timedelta(days=1)
-                    notice_desc = "1 calendar day (24h)"
+                    min_start = _add_working_days(today, 2)
+                    notice_desc = "2 working days (48 hours)"
                 else:
                     min_start = _add_working_days(today, 7)
                     notice_desc = "7 working days"
@@ -476,9 +476,62 @@ class CheckLeaveEligibilityTool(Tool):
                     action_type="data_read",
                 )
 
+        # ── Dynamic policy evaluation (Hajj only) ─────────────────────────────
+        # Try reading eligibility from the vector knowledge base first.
+        # Falls back to hardcoded checks #6 and #7 below if uncertain.
+        _policy_engine_approved = False
+        if leave_type_code == "hajj" and employee.get("start_date"):
+            try:
+                from workflow.policy_engine import PolicyEngine
+                _hire_date = _parse_date(employee["start_date"])
+                _service_days = (today - _hire_date).days
+                _used_times = self._ds.count_leave_type_usage(
+                    ctx.tenant_id, employee["id"], leave_type_code
+                ) if employee.get("id") else 0
+
+                engine = PolicyEngine(
+                    tenant_id=ctx.tenant_id,
+                    user_role=ctx.role,
+                )
+                policy_decision = engine.evaluate_hajj_eligibility(
+                    service_days=_service_days,
+                    previous_hajj_leaves=_used_times,
+                )
+
+                if policy_decision.certain:
+                    if not policy_decision.eligible:
+                        reason = policy_decision.reason
+                        if policy_decision.policy_citation:
+                            reason += (
+                                f' (Policy: "{policy_decision.policy_citation[:120]}")'
+                            )
+                        return ToolResult(
+                            success=True,
+                            data={
+                                "eligible": False,
+                                "reason": reason,
+                                "leave_type_name": leave_type["name_en"],
+                                "policy_source": policy_decision.policy_source,
+                            },
+                            action_type="data_read",
+                        )
+                    else:
+                        # Policy says eligible — skip checks #6 and #7 for Hajj
+                        # and fall through to the "All checks passed" block.
+                        # Checks #1-5 (probation, notice, balance, overlap) already passed.
+                        _policy_engine_approved = True
+                # If not certain: fall through to hardcoded checks #6 and #7
+            except Exception as _pe_exc:
+                import logging
+                logging.getLogger(__name__).error(
+                    "PolicyEngine: unexpected error for Hajj — hardcoded fallback: %s",
+                    _pe_exc,
+                )
+                # Fall through to hardcoded checks below
+
         # 6. Service minimum (e.g. marriage/umrah: 1 year, hajj: 5 years)
         service_min = leave_type.get("service_min_days", 0) or 0
-        if service_min > 0 and employee.get("start_date"):
+        if not _policy_engine_approved and service_min > 0 and employee.get("start_date"):
             hire_date = _parse_date(employee["start_date"])
             service_days = (today - hire_date).days
             if service_days < service_min:
@@ -500,7 +553,7 @@ class CheckLeaveEligibilityTool(Tool):
 
         # 7. Career usage cap (e.g. marriage=1, hajj=1, umrah=1, maternity=3, paternity=3)
         max_times = leave_type.get("max_times_in_career")
-        if max_times is not None and employee.get("id"):
+        if not _policy_engine_approved and max_times is not None and employee.get("id"):
             used_times = self._ds.count_leave_type_usage(
                 ctx.tenant_id, employee["id"], leave_type_code
             )
