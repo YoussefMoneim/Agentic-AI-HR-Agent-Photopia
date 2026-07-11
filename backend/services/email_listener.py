@@ -23,6 +23,7 @@ import email.utils
 import imaplib
 import logging
 import re
+import uuid
 from typing import TYPE_CHECKING
 
 import config
@@ -43,6 +44,21 @@ _QUOTED_LINE_RE = re.compile(r"^>.*", re.MULTILINE)
 _QUOTE_PREAMBLE_RE = re.compile(r"^On .+wrote:.*$", re.MULTILINE | re.DOTALL)
 _REPLY_TOKEN_RE = re.compile(r"Reply-Token:\s*(<[^>]+>)", re.IGNORECASE)
 
+# Outlook's default reply/forward quote block: a long underscore separator,
+# or the "From:/Sent:/To:/Subject:" header block it inserts above the quoted
+# message. Neither is caught by _QUOTE_PREAMBLE_RE (Gmail/Apple-Mail style
+# "On ... wrote:" only).
+_OUTLOOK_QUOTE_RE = re.compile(
+    r"^_{5,}\s*$|^From:.*\r?\nSent:.*\r?\nTo:.*\r?\nSubject:.*$",
+    re.MULTILINE,
+)
+# Belt-and-suspenders: this exact phrase only ever appears inside our own
+# branded reply template (_send_reply in services/email_agent.py). If a mail
+# client renders the quoted HTML reply as plain text and echoes it back
+# (seen from Outlook), this phrase marks where OUR text starts — anything
+# from here on is quoted, never new content from the sender.
+_OWN_REPLY_SIGNATURE_RE = re.compile(r"Fotopia HR System", re.IGNORECASE)
+
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
@@ -51,6 +67,27 @@ def _has_negation_before(text: str, match_start: int) -> bool:
     window = text[max(0, match_start - 60):match_start]
     tokens = re.findall(r"\b\w+(?:'\w+)?\b", window)
     return bool(frozenset(tokens) & _NEGATIONS)
+
+
+def _strip_quoted_content(body_text: str) -> str:
+    """Remove quoted prior-message content, leaving only the sender's new text.
+
+    Must run before body text reaches any content-sensitive parsing (decision
+    parsing, intent classification, regex date/leave-type extraction) —
+    otherwise a mail client that echoes the previous message back (Outlook's
+    "From:/Sent:/To:/Subject:" block, Gmail/Apple-Mail's "On ... wrote:", or
+    plain ">"-quoting) can leak OUR OWN previous reply — including its
+    placeholder example text like "Start date (e.g. 2026-07-21)" — back in as
+    if the sender had typed it. That previously caused the email leave-request
+    flow to silently submit using the example dates instead of asking again.
+    """
+    text = _QUOTED_LINE_RE.sub("", body_text)
+    text = _QUOTE_PREAMBLE_RE.sub("", text)
+    for pattern in (_OUTLOOK_QUOTE_RE, _OWN_REPLY_SIGNATURE_RE):
+        m = pattern.search(text)
+        if m:
+            text = text[:m.start()]
+    return text.strip()
 
 
 # ── Public interface ──────────────────────────────────────────────────────────
@@ -62,10 +99,7 @@ def parse_decision(body_text: str) -> str | None:
     Security-critical: designed to fail CLOSED (return None) on any ambiguity.
     Strips quoted reply content before parsing — operates on new content only.
     """
-    # Strip quoted content — operate on new content only
-    stripped = _QUOTED_LINE_RE.sub("", body_text)
-    stripped = _QUOTE_PREAMBLE_RE.sub("", stripped)
-    text = stripped.lower()
+    text = _strip_quoted_content(body_text).lower()
 
     approved_match = re.search(r"\bapproved\b", text)
     rejected_match = re.search(r"\brejected\b", text)
@@ -283,6 +317,27 @@ def _extract_body(msg) -> str:
             return ""
 
 
+def _extract_thread_id(msg) -> str:
+    """
+    Extract a stable thread identifier from email headers.
+    Prefers References (the full thread chain — first ID is the root),
+    falls back to In-Reply-To (immediate parent), then this message's own
+    Message-ID (new thread), then a random UUID if none of those exist.
+    """
+    references = msg.get("References", "").strip()
+    if references:
+        first_ref = references.split()[0].strip()
+        if first_ref:
+            return first_ref.strip("<>")
+
+    in_reply_to = msg.get("In-Reply-To", "").strip()
+    if in_reply_to:
+        return in_reply_to.strip("<>")
+
+    message_id = msg.get("Message-ID", "").strip()
+    return message_id.strip("<>") if message_id else str(uuid.uuid4())
+
+
 def _decode_header_value(raw: str | None) -> str:
     """Decode RFC 2047 encoded email header values."""
     if not raw:
@@ -331,6 +386,7 @@ def _process_imap_message(
 
     in_reply_to = msg.get("In-Reply-To", "").strip() or None
     message_id = msg.get("Message-ID", "").strip() or None
+    thread_id = _extract_thread_id(msg)
     body_text = _extract_body(msg)
 
     _log.debug(
@@ -353,10 +409,11 @@ def _process_imap_message(
             ds=ds,
             tenant_id=tenant_id,
             from_email=from_email,
-            body_text=body_text,
+            body_text=_strip_quoted_content(body_text),
             in_reply_to_message_id=in_reply_to,
             our_message_id=message_id,
             msg_headers=msg_headers,
+            thread_id=thread_id,
         )
 
     # Always mark Seen — even on parse failure — to prevent infinite retry

@@ -13,6 +13,7 @@ MAX_CHUNK_CHARS = 3200 matches the existing ingest_policies.py constant
 so behavior is consistent with what's already running.
 """
 from __future__ import annotations
+import os
 import re
 import logging
 
@@ -21,6 +22,28 @@ _log = logging.getLogger(__name__)
 MAX_CHUNK_CHARS = 3200
 OVERLAP_CHARS = 150
 MIN_CHUNK_CHARS = 50
+
+
+def canonical_document_id(source_path_or_name: str) -> str:
+    """
+    Canonical document ID — strip path, extension, normalize.
+
+    Ingestion paths (local policies/, SharePoint) each pass a different raw
+    string as document_name (filename stem, human-readable title, etc.).
+    Without normalizing to a single canonical form, the same logical document
+    ingested via two paths gets two different document_ids, so re-ingestion
+    never deduplicates and chunks accumulate.
+
+    'policies/public/03_leave_policy.md' -> '03_leave_policy'
+    'WIN Holding Leave Policy 2025'      -> 'win_holding_leave_policy_2025'
+    'leaves_policy_egypt_v2.pdf'         -> 'leaves_policy_egypt_v2'
+    """
+    name = os.path.basename(source_path_or_name)
+    name = os.path.splitext(name)[0]
+    name = name.lower().strip()
+    name = re.sub(r'[^a-z0-9]+', '_', name)
+    name = name.strip('_')
+    return name
 
 
 def chunk_document(content: str, document_name: str) -> list[str]:

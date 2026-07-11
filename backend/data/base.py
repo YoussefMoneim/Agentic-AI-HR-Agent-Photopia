@@ -367,3 +367,21 @@ class DataSource(ABC):
         """Check and record rate limit for sender in email_agent_rate_limit.
         Returns: {"allowed": bool, "count": int, "blocked_until": str | None}
         Resets window after 1 hour. Blocks sender for block_minutes when count > max_per_hour."""
+
+    @abstractmethod
+    def get_email_session(self, tenant_id: str, thread_id: str) -> list[dict]:
+        """Return structured turn history for an email thread, oldest first.
+        Each turn: {"role": "user"|"assistant", "content": str, "intent": str|None,
+        "extracted_params": dict|None}. Returns [] if the thread has no history yet."""
+
+    @abstractmethod
+    def upsert_email_session(
+        self,
+        tenant_id: str,
+        thread_id: str,
+        employee_email: str,
+        messages: list[dict],
+        max_messages: int = 10,
+    ) -> None:
+        """Create or update the turn history for an email thread.
+        Keeps only the last max_messages turns (oldest trimmed first)."""

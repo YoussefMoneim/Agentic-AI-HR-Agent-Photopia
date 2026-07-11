@@ -18,6 +18,7 @@ Invariants:
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -78,6 +79,24 @@ _POLICY_KEYWORDS = frozenset([
     "سياسة", "قواعد",
 ])
 
+# Any recognizable date reference — digits, weekday/month names, or common
+# relative-time phrases. Used to gate whether the LLM is even ALLOWED to
+# return start_date/end_date (see _has_any_date_signal below).
+_DATE_SIGNAL_RE = re.compile(
+    r"\b("
+    r"\d{4}-\d{2}-\d{2}"                       # 2026-07-20
+    r"|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?"      # 20/07, 07-20-2026
+    r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+    r"|january|february|march|april|may|june|july|august|september"
+    r"|october|november|december"
+    r"|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec"
+    r"|today|tomorrow|tonight"
+    r"|next week|this week|next month|this month|next weekend|this weekend"
+    r"|coming week|coming days|few days|couple of days"
+    r")\b",
+    re.IGNORECASE,
+)
+
 
 # ── Module-level lazy registry singleton ──────────────────────────────────────
 
@@ -113,21 +132,74 @@ def _is_auto_reply(msg_headers: dict) -> bool:
 
 # ── Intent classification ─────────────────────────────────────────────────────
 
-def _classify_intent(body_text: str, subject: str = "") -> EmailIntent:
+def _format_thread_context(history: list[dict] | None) -> str:
+    """
+    Render prior turns as short lines for the classifier prompt, so a
+    follow-up like "can I take 5 days of that?" resolves against what was
+    already discussed (e.g. the leave_type from a prior balance_check).
+
+    History is structured turn data (role/content/intent/extracted_params),
+    never raw LLM chat — this only informs classification, it never becomes
+    reply content (see module docstring invariant #6).
+    """
+    if not history:
+        return ""
+    lines = []
+    for turn in history[-6:]:
+        if turn.get("role") == "user":
+            suffix = f" (classified as {turn['intent']})" if turn.get("intent") else ""
+            lines.append(f"Employee previously said: {turn.get('content', '')}{suffix}")
+        else:
+            lines.append(f"Agent previously replied: {turn.get('content', '')}")
+    return "\n".join(lines)
+
+
+def _has_any_date_signal(body_text: str, history: list[dict] | None) -> bool:
+    """
+    True if the CURRENT message or any earlier USER turn (never our own
+    assistant replies — those contain our own placeholder example dates,
+    e.g. "e.g. 2026-07-21", which must never count as the employee having
+    named a date) mentions anything date-shaped.
+
+    Guards against the LLM inventing plausible-looking calendar dates for a
+    leave request when nothing in the conversation ever specified one —
+    e.g. "I want a holiday" -> "annual leave" -> "sick leave", with no date
+    mentioned anywhere, must never silently submit using made-up dates.
+    """
+    combined = body_text or ""
+    for turn in (history or []):
+        if turn.get("role") == "user":
+            combined += " " + (turn.get("content") or "")
+    return bool(_DATE_SIGNAL_RE.search(combined))
+
+
+def _classify_intent(
+    body_text: str, subject: str = "", history: list[dict] | None = None
+) -> EmailIntent:
     """
     Classify email intent using Claude Haiku LLM.
 
     SECURITY: Only passes subject + first 500 chars of body to LLM.
     FAIL CLOSED: Any error returns intent='unknown' via keyword fallback — never crashes.
     LLM extracts dates and leave type — no regex needed in handlers when successful.
+
+    history (optional): prior turns in this email thread, used only to help
+    resolve references ("that", "it", an earlier-mentioned leave type) —
+    never used to generate reply content directly.
     """
     import json
 
     safe_subject = (subject or "")[:200]
     safe_body = (body_text or "")[:500]
+    thread_context = _format_thread_context(history)
+    context_block = (
+        f"\nPrevious messages in this email thread (for resolving references only):\n"
+        f"{thread_context}\n"
+        if thread_context else ""
+    )
 
     prompt = f"""You are an HR email classifier. Classify this email and extract key information.
-
+{context_block}
 Subject: {safe_subject}
 Body: {safe_body}
 
@@ -146,15 +218,17 @@ Respond with ONLY valid JSON, no markdown, no explanation:
 
 Rules:
 - "I want a holiday / leave / time off / vacation / break" → leave_request
-- "first two weeks of August" → start_date: current year August 1, end_date: August 14
-- "next week" → approximate from today's date (today is {__import__('datetime').date.today()})
+- "first two weeks of August" → start_date: current year August 1, end_date: August 14 (the phrase itself fully specifies the range — safe to resolve)
+- A vague relative period ("next week", "sometime next month", "in a few days") used ALONE, with no day-count that could conflict with it, may be resolved to its natural bounded range approximated from today's date (today is {__import__('datetime').date.today()})
+- If the employee gives a specific NUMBER OF DAYS (e.g. "2 days", "3 days") together with a vague relative period like "next week" WITHOUT naming which exact days within that period, do NOT guess which days — set start_date and end_date to null so the employee is asked for exact dates. Example: "2 days sick leave next week" → leave_type: "sick", start_date: null, end_date: null (which 2 of the ~5-7 days in "next week" is not stated — never invent that choice)
 - "cancel my leave / withdraw / don't need leave anymore" → leave_cancellation
 - "what is my balance / how many days do I have" → balance_check
 - "status of my request / is my leave approved" → leave_status
 - "what is the policy / how many days do I get" → policy_question
 - Greetings, unrelated, unclear with low confidence → unknown
-- Default leave_type to "annual" if employee says "holiday" or "vacation" or "leave" without specifying type
-- If dates are mentioned in any natural language form, convert to YYYY-MM-DD format"""
+- If the employee says "holiday" or "vacation" or "leave" or "time off" WITHOUT naming a specific type (annual, sick, casual, etc.), set leave_type to null — do NOT guess or assume annual. The employee must be asked to specify which type they mean.
+- If dates are mentioned in any natural language form, convert to YYYY-MM-DD format
+- If this email references something from the previous messages above (e.g. "that", "it", "the same leave type"), use those previous messages to fill in extracted_params — do not leave a field null if the thread context already answers it"""
 
     try:
         provider = ClaudeProvider(
@@ -171,10 +245,18 @@ Rules:
             if clean.startswith("json"):
                 clean = clean[4:]
         data = json.loads(clean.strip())
+        extracted_params = data.get("extracted_params") or {}
+        if not _has_any_date_signal(body_text, history):
+            # No date was ever actually mentioned by the employee, in this
+            # message or any earlier turn — discard any date the LLM
+            # invented anyway rather than trusting it into a real
+            # submission. See _has_any_date_signal docstring.
+            extracted_params["start_date"] = None
+            extracted_params["end_date"] = None
         return EmailIntent(
             intent=data.get("intent", "unknown"),
             confidence=data.get("confidence", "low"),
-            extracted_params=data.get("extracted_params") or {},
+            extracted_params=extracted_params,
             reason=data.get("reason", ""),
         )
     except Exception as e:
@@ -225,8 +307,16 @@ def _send_reply(
     plain_content: str,
     in_reply_to: str | None,
     our_message_id: str | None,
+    thread_id: str | None = None,
 ) -> None:
-    """Send a branded HTML reply. Never called for skipped/unregistered senders."""
+    """Send a branded HTML reply. Never called for skipped/unregistered senders.
+
+    thread_id (optional): the stable thread identifier computed by
+    services/email_listener.py::_extract_thread_id. Used to anchor the
+    outgoing References header — see module docstring on why this must
+    stay stable rather than being derived hop-by-hop from whatever the
+    inbound message happened to carry.
+    """
     reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
     domain = (
         config.SMTP_FROM_ADDRESS.split("@")[-1]
@@ -271,7 +361,24 @@ def _send_reply(
         body_html=body_html,
         body_plain=plain_content,
         message_id=new_message_id,
-        in_reply_to=in_reply_to or our_message_id,
+        # Prefer the direct parent (this inbound message's own Message-ID)
+        # over in_reply_to (that message's OWN In-Reply-To, i.e. one hop
+        # further back) — the direct parent is always correct when present.
+        in_reply_to=our_message_id or in_reply_to,
+        # Anchor References to the stable thread_id rather than chaining
+        # from whatever the inbound message carried. A single-entry
+        # References header (the old behaviour) gets silently truncated on
+        # every hop — after two hops the true thread root drops out of the
+        # chain the recipient's client sends back, _extract_thread_id()
+        # then mints a brand-new (history-less) thread mid-conversation,
+        # and multi-turn slot-filling silently loses everything said so
+        # far. Re-asserting thread_id here is self-healing regardless of
+        # how the recipient's client built its own References.
+        references=f"<{thread_id}>" if thread_id else None,
+        # Hitting "Reply" must route back to the inbox the IMAP listener
+        # actually polls (IMAP_USERNAME), not the SMTP send-from address —
+        # otherwise every follow-up email lands in a mailbox nobody reads.
+        reply_to=config.IMAP_USERNAME or None,
     )
 
 
@@ -473,22 +580,68 @@ def _handle_policy_question(
     return "Policy Information", "📖", "#2563eb", html, plain
 
 
+_LEAVE_TYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "sick": ("sick", "medical", "ill", "doctor"),
+    "casual": ("casual",),
+    "maternity": ("maternity",),
+    "hajj": ("hajj",),
+    "umrah": ("umrah",),
+    "annual": ("annual",),
+}
+# Deliberately NOT mapped to a type: "holiday", "vacation", "leave", "time off",
+# "day off" — these are vague and must trigger an explicit question, never a
+# silent guess (an employee saying "holiday" doesn't mean "annual" specifically).
+
+
+def _merge_leave_draft(history: list[dict] | None, current_params: dict) -> dict:
+    """
+    Merge leave-request fields already given earlier in this email thread
+    with the current message's fields, so a multi-email back-and-forth
+    (mirroring the chat UI's slot-filling) only asks for what's still
+    missing instead of repeating the whole checklist every reply.
+
+    Walks backward through history; stops at the first turn that wasn't
+    itself a leave_request (a topic change resets the draft — e.g. if the
+    employee asked a balance question in between).
+    """
+    merged = {
+        "leave_type": current_params.get("leave_type"),
+        "start_date": current_params.get("start_date"),
+        "end_date": current_params.get("end_date"),
+        "reason": current_params.get("reason"),
+    }
+    for turn in reversed(history or []):
+        if turn.get("role") != "user":
+            continue
+        if turn.get("intent") != "leave_request":
+            break
+        prior = turn.get("extracted_params") or {}
+        for field in merged:
+            if merged[field] is None and prior.get(field) is not None:
+                merged[field] = prior[field]
+    return merged
+
+
 def _handle_leave_request(
     ctx: ToolContext, registry: "ToolRegistry", name: str, body_text: str,
     extracted_params: dict | None = None,
+    history: list[dict] | None = None,
 ) -> tuple[str, str, str, str, str]:
     """Attempt to submit a leave request from email content.
-    If dates can't be parsed, returns a clarification template.
+
+    Merges this message's extracted fields with anything already given
+    earlier in the same thread (_merge_leave_draft) — a genuine multi-turn
+    conversation across emails, e.g. "I want a holiday" -> asks for type +
+    dates -> "annual" -> only asks for dates now, not the whole list again.
     Never bypasses the constraint engine.
     """
-    params = extracted_params or {}
-    llm_leave_type = params.get("leave_type")
-    leave_type_code = llm_leave_type or "annual"
-    start_date = params.get("start_date")
-    end_date = params.get("end_date")
-    reason = params.get("reason") or "Submitted via email"
+    draft = _merge_leave_draft(history, extracted_params or {})
+    leave_type_code = draft.get("leave_type")
+    start_date = draft.get("start_date")
+    end_date = draft.get("end_date")
+    reason = draft.get("reason") or "Submitted via email"
 
-    if not start_date or not end_date:
+    if not start_date or not end_date or not leave_type_code:
         import re
         snippet = body_text[:_MAX_BODY_CHARS].lower()
 
@@ -497,50 +650,61 @@ def _handle_leave_request(
             r'\b(\d{1,2}/\d{1,2}/\d{4})\b',
             r'\b(\d{1,2}/\d{1,2})\b',
         ]
-        found_dates = []
-        for pattern in date_patterns:
-            found_dates.extend(re.findall(pattern, snippet))
+        found_dates = [d for p in date_patterns for d in re.findall(p, snippet)]
 
-        if not llm_leave_type:
-            if any(kw in snippet for kw in ("sick", "medical", "ill", "doctor")):
-                leave_type_code = "sick"
-            elif "casual" in snippet:
-                leave_type_code = "casual"
-            elif "maternity" in snippet:
-                leave_type_code = "maternity"
-            elif "hajj" in snippet:
-                leave_type_code = "hajj"
-            elif "umrah" in snippet:
-                leave_type_code = "umrah"
+        if not leave_type_code:
+            for code, keywords in _LEAVE_TYPE_KEYWORDS.items():
+                if any(kw in snippet for kw in keywords):
+                    leave_type_code = code
+                    break
 
-        if len(found_dates) < 2:
-            html = (
-                f"<p style='color:#444;font-size:14px'>Dear {name},<br><br>"
-                f"Thank you for your leave request. To submit it on your behalf, "
-                f"I need a few more details:</p>"
-                f"<div style='background:#f8f8fb;border-radius:6px;padding:16px;font-size:14px'>"
-                f"<p style='margin:0 0 8px 0;font-weight:bold;color:#1a1a2e'>Please reply with:</p>"
-                f"<ul style='margin:0;padding-left:20px;color:#444;line-height:2.2'>"
-                f"<li><strong>Leave type</strong> &mdash; Annual, Sick, Casual, Hajj, etc.</li>"
-                f"<li><strong>Start date</strong> &mdash; e.g. 2026-07-21</li>"
-                f"<li><strong>End date</strong> &mdash; e.g. 2026-07-23</li>"
-                f"<li><strong>Reason</strong> &mdash; optional</li>"
-                f"</ul></div>"
-                f"<p style='color:#888;font-size:12px;margin-top:16px'>"
-                f"Or log into the HR portal to submit directly.</p>"
-            )
-            plain = (
-                f"Dear {name},\n\nTo submit your leave request, please provide:\n"
-                f"- Leave type (Annual, Sick, etc.)\n"
-                f"- Start date (e.g. 2026-07-21)\n"
-                f"- End date\n"
-                f"- Reason (optional)\n\n"
-                f"Or log into the HR portal."
-            )
-            return "Leave Request — Details Needed", "📅", "#c9a84c", html, plain
+        # Fill whichever date slot(s) are still missing from THIS message's
+        # own text — history already contributed via the merge above.
+        for slot in ("start_date", "end_date"):
+            if not draft.get(slot) and found_dates:
+                draft[slot] = found_dates.pop(0)
+        start_date = draft.get("start_date")
+        end_date = draft.get("end_date")
 
-        start_date = found_dates[0]
-        end_date = found_dates[1]
+    missing = []
+    if not leave_type_code:
+        missing.append(("Leave type", "Annual, Sick, Casual, Hajj, etc."))
+    if not start_date:
+        missing.append(("Start date", "e.g. 2026-07-21"))
+    if not end_date:
+        missing.append(("End date", "e.g. 2026-07-23"))
+
+    if missing:
+        known_bits = []
+        if leave_type_code:
+            known_bits.append(f"{leave_type_code.replace('_', ' ').title()} leave")
+        if start_date:
+            known_bits.append(f"starting {start_date}")
+        if end_date:
+            known_bits.append(f"ending {end_date}")
+        acknowledgement = f"Got it — {', '.join(known_bits)} noted. " if known_bits else ""
+
+        missing_html = "".join(
+            f"<li><strong>{label}</strong> &mdash; {hint}</li>" for label, hint in missing
+        )
+        missing_plain = "".join(f"- {label} ({hint})\n" for label, hint in missing)
+
+        html = (
+            f"<p style='color:#444;font-size:14px'>Dear {name},<br><br>"
+            f"{acknowledgement}I just need a bit more to submit this for you:</p>"
+            f"<div style='background:#f8f8fb;border-radius:6px;padding:16px;font-size:14px'>"
+            f"<p style='margin:0 0 8px 0;font-weight:bold;color:#1a1a2e'>Please reply with:</p>"
+            f"<ul style='margin:0;padding-left:20px;color:#444;line-height:2.2'>{missing_html}</ul>"
+            f"</div>"
+            f"<p style='color:#888;font-size:12px;margin-top:16px'>"
+            f"Or log into the HR portal to submit directly.</p>"
+        )
+        plain = (
+            f"Dear {name},\n\n{acknowledgement}To submit your leave request, please provide:\n"
+            f"{missing_plain}\n"
+            f"Or log into the HR portal."
+        )
+        return "Leave Request — Details Needed", "📅", "#c9a84c", html, plain
 
     tool_result = registry.execute("submit_leave_request", {
         "leave_type_code": leave_type_code,
@@ -592,7 +756,12 @@ def _handle_leave_request(
         return "Leave Request Submitted", "✅", "#16a34a", html, plain
 
     error_msg = tool_result.error or "Unknown error"
-    if any(w in error_msg.lower() for w in ("weekend", "working day", "saturday", "sunday")):
+    if any(w in error_msg.lower() for w in ("advance notice", "notice period")):
+        # The constraint engine's own message is already specific and actionable
+        # (e.g. "requires 7 working days advance notice. Earliest allowed start: ...")
+        # — surface it directly instead of overwriting it with a generic reason.
+        explanation = error_msg
+    elif any(w in error_msg.lower() for w in ("weekend", "saturday", "sunday", "public holiday")):
         explanation = (
             "The dates you requested fall entirely on a weekend or public holiday. "
             "Please select working days."
@@ -690,6 +859,7 @@ def process_employee_email(
     in_reply_to_message_id: str | None,
     our_message_id: str | None,
     msg_headers: dict,
+    thread_id: str | None = None,
 ) -> None:
     """Process an inbound email that is not a workflow approval reply.
 
@@ -697,9 +867,17 @@ def process_employee_email(
       1. Loop detection  — header check, no DB access
       2. Identity check  — DB lookup by sender email
       3. Rate limit      — DB upsert/check; rate-limited senders get one reply
-      4. Intent classify — keyword match on first 500 chars
+      4. Intent classify — keyword match on first 500 chars, informed by prior
+                            thread turns (if thread_id given) for reference
+                            resolution only — never used as reply content
       5. Tool dispatch   — uses employee's real DB role
       6. Branded HTML reply — no LLM-generated content in body
+      7. Save thread turn — structured (intent/extracted_params/summary) only
+
+    thread_id (optional): stable identifier for this email thread (see
+    services/email_listener.py::_extract_thread_id). When given, turn
+    history is loaded before classification and saved after the reply is
+    built, so a follow-up email in the same thread has context.
     """
 
     # 1. Loop detection — MUST be first, no DB access whatsoever
@@ -750,49 +928,109 @@ def process_employee_email(
             plain_content=plain,
             in_reply_to=in_reply_to_message_id,
             our_message_id=our_message_id,
+            thread_id=thread_id,
         )
         return
 
-    # 4. Classify intent
-    intent_result = _classify_intent(body_text, subject=msg_headers.get("subject", ""))
-    intent = intent_result.intent
-    _log.info(
-        "email_agent: from=%s intent=%s confidence=%s",
-        from_email, intent, intent_result.confidence,
-    )
+    # 4. Classify intent — load prior thread turns first, if any, so the
+    # classifier can resolve references to earlier messages in this thread.
+    history = ds.get_email_session(tenant_id, thread_id) if thread_id else []
 
-    # 5. Dispatch to tool using employee's real DB role
-    ctx = _build_context(employee, tenant_id)
-    registry = _get_registry(ds)
-
-    if intent == "balance_check":
-        title, icon, color, html, plain = _handle_leave_balance(ctx, registry, display_name)
-    elif intent == "leave_status":
-        title, icon, color, html, plain = _handle_leave_status(ctx, registry, display_name)
-    elif intent == "policy_question":
-        title, icon, color, html, plain = _handle_policy_question(
-            ctx, registry, display_name, body_text
+    try:
+        intent_result = _classify_intent(
+            body_text, subject=msg_headers.get("subject", ""), history=history
         )
-    elif intent == "leave_request":
-        title, icon, color, html, plain = _handle_leave_request(
-            ctx, registry, display_name, body_text,
-            extracted_params=intent_result.extracted_params,
+        intent = intent_result.intent
+        _log.info(
+            "email_agent: from=%s intent=%s confidence=%s",
+            from_email, intent, intent_result.confidence,
         )
-    elif intent == "leave_cancellation":
-        title, icon, color, html, plain = _handle_leave_cancellation(display_name)
-    else:
-        title, icon, color, html, plain = _handle_unknown(display_name)
 
-    # 6. Send branded HTML reply
-    _send_reply(
-        to_email=from_email,
-        subject=subject,
-        title=title,
-        icon=icon,
-        color=color,
-        html_content=html,
-        plain_content=plain,
-        in_reply_to=in_reply_to_message_id,
-        our_message_id=our_message_id,
-    )
-    _log.info("email_agent: reply sent to %s (intent=%s)", from_email, intent)
+        # 5. Dispatch to tool using employee's real DB role
+        ctx = _build_context(employee, tenant_id)
+        registry = _get_registry(ds)
+
+        if intent == "balance_check":
+            title, icon, color, html, plain = _handle_leave_balance(ctx, registry, display_name)
+        elif intent == "leave_status":
+            title, icon, color, html, plain = _handle_leave_status(ctx, registry, display_name)
+        elif intent == "policy_question":
+            title, icon, color, html, plain = _handle_policy_question(
+                ctx, registry, display_name, body_text
+            )
+        elif intent == "leave_request":
+            title, icon, color, html, plain = _handle_leave_request(
+                ctx, registry, display_name, body_text,
+                extracted_params=intent_result.extracted_params,
+                history=history,
+            )
+        elif intent == "leave_cancellation":
+            title, icon, color, html, plain = _handle_leave_cancellation(display_name)
+        else:
+            title, icon, color, html, plain = _handle_unknown(display_name)
+
+        # 6. Send branded HTML reply
+        _send_reply(
+            to_email=from_email,
+            subject=subject,
+            title=title,
+            icon=icon,
+            color=color,
+            html_content=html,
+            plain_content=plain,
+            in_reply_to=in_reply_to_message_id,
+            our_message_id=our_message_id,
+            thread_id=thread_id,
+        )
+        _log.info("email_agent: reply sent to %s (intent=%s)", from_email, intent)
+
+        # 7. Save thread turn — structured summary only, never the HTML/LLM body
+        if thread_id:
+            updated_history = history + [
+                {
+                    "role": "user",
+                    "content": body_text[:300],
+                    "intent": intent,
+                    "extracted_params": intent_result.extracted_params,
+                },
+                {"role": "assistant", "content": plain[:300]},
+            ]
+            ds.upsert_email_session(tenant_id, thread_id, from_email, updated_history)
+
+    except Exception:
+        # Guarantee the employee is never left without ANY response — a
+        # classification, tool, or DB error partway through must still
+        # produce a reply, not silence. This is the one place in the
+        # pipeline allowed to send a generic message, precisely because
+        # everything more specific above it has already failed.
+        _log.exception(
+            "email_agent: unhandled error processing email from %s — sending fallback reply",
+            from_email,
+        )
+        try:
+            _send_reply(
+                to_email=from_email,
+                subject=subject,
+                title="We Hit a Snag",
+                icon="⚠️",
+                color="#dc2626",
+                html_content=(
+                    f"<p style='color:#444;font-size:14px'>Dear {display_name},<br><br>"
+                    f"We ran into an unexpected issue processing your email. "
+                    f"Please try again, or contact HR directly at "
+                    f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>"
+                    f"hr.agent.fotopia@gmail.com</a>.</p>"
+                ),
+                plain_content=(
+                    f"Dear {display_name},\n\nWe ran into an unexpected issue processing "
+                    f"your email. Please try again, or contact hr.agent.fotopia@gmail.com."
+                ),
+                in_reply_to=in_reply_to_message_id,
+                our_message_id=our_message_id,
+                thread_id=thread_id,
+            )
+        except Exception:
+            _log.exception(
+                "email_agent: fallback reply ALSO failed for %s — giving up, no reply sent",
+                from_email,
+            )

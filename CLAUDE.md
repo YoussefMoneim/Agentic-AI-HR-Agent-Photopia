@@ -26,9 +26,10 @@ An enterprise SaaS AI agent platform that automates HR tasks for Fotopia Technol
 **Phase 2 — Partially done:**
 - ✓ Real JWT authentication (`backend/core/auth.py::decode_context`) replaces the `build_context()` stub. A `DEBUG_ALLOW_DEMO_ROLE` fallback still exists for local development but a startup assertion in `config.py` refuses it outside `APP_ENV in (local, dev)`.
 - ✓ **Full leave-management feature**, well beyond the original Phase 1 scope: submit → eligibility → approve/reject → cancel lifecycle, cancellation-of-already-approved-leave, a team leave calendar, the full WIN Holding Leave Policy engine (`HR/BTE 001/7-2025` — 17 leave types, notice periods, service minimums, career usage caps, carry-over expiry, casual sub-quota, 25% department concurrent cap), a deterministic constraint engine (hard/soft/advisory rules, `backend/workflow/constraints.py`), a document-sensitivity appropriateness layer (`backend/workflow/appropriateness.py`), a bidirectional email approval agent (SMTP send + IMAP reply parsing, correlation tokens, rate limiting), and one-way Odoo sync for approved/cancelled leave. Covered by ~283 passing tests.
-- 🔲 Still open: Redis session history (still an in-memory `_sessions` dict), onboarding document-gen tools, ZDR agreement with Anthropic.
+- ✓ **Feeder-agent knowledge layer (Phase 1 of the Zumra "design/execute" split — feeder agent ingests, HR agent tools retrieve, see Layer 7 below)**: `KnowledgeBase` abstract interface (`backend/knowledge/base.py`) so tools never touch pgvector directly; `PgvectorKnowledgeBase` (`backend/knowledge/pgvector_kb.py`) backed by the existing `private_document_chunks` table — no new table, RLS/ACL unchanged from Phase 1.5 (`allowed_roles`, `sensitivity`, `classified_at` quarantine). Voyage AI (`voyage-multilingual-2`, 1024-dim) embeddings for semantic search, with automatic full-text fallback if embeddings aren't populated yet or the Voyage call fails — ACL is pre-filtered in the SQL `WHERE` clause in both cases (Rule 14 compliant). `search_policy` tool now goes through `KnowledgeBase`, not the data layer directly. A SharePoint connector (`backend/connectors/sharepoint.py`, Microsoft Graph delta-sync, `sharepoint_sync_state` table) auto-ingests policy documents from a watched folder.
+- 🔲 Still open: Redis session history (still an in-memory `_sessions` dict), onboarding document-gen tools, ZDR agreement with Anthropic, document ingest API endpoints (`POST /api/knowledge/ingest` — ingestion today is script/connector-driven only, no HR-manager-facing upload endpoint yet), Tier 1 `public_knowledge_chunks` table (schema exists, no ingestion path populates it), `VOYAGE_API_KEY` is required at `build_registry()` time — not documented anywhere before this note, and its absence fails the entire registry (and therefore every test that touches it), not just knowledge tools.
 
-**Phase 3+ — Not started.** RAG/knowledge layer, audit log hash-chaining/WORM, field-level encryption, onboarding state-machine writes. See Section 7.
+**Phase 3+ — Not started.** Audit log hash-chaining/WORM, field-level encryption, onboarding state-machine writes. RAG metadata-audit tooling and Tier 1 public-knowledge ingestion remain open under the knowledge layer above. See Section 7.
 
 ---
 
@@ -96,18 +97,28 @@ Layers 1-6 and 9 exist today (in some form). Layers 7-8 and the parallel/future 
    FUTURE: per-tenant database option for premium clients,
    field-level encryption for national_id/salary (blind index pattern).
 
-7. KNOWLEDGE / RAG LAYER                                    [NOT BUILT — Phase 3]
-   pgvector, co-located with the relational DB (inherits RLS).
-   Every chunk carries: tenant_id + allowed_roles + owner_employee_id.
-   Retrieval filters on this metadata BEFORE semantic search — never after
-   (this is the lesson from the EchoLeak/Copilot failures — see Section 6).
-   Labeling: tool-generated documents are auto-tagged by document TYPE
-   (each type = allowed_roles + template, same idea as a "batch class" in
-   Fotopia's capture/DigitizeMe product — see Section 8 for that mapping).
+7. KNOWLEDGE / RAG LAYER                                    [PARTIALLY BUILT — Phase 1 of feeder agent]
+   pgvector, co-located with the relational DB (inherits RLS). Accessed ONLY
+   through the KnowledgeBase interface (backend/knowledge/base.py) — this is
+   the Zumra "design/execute" split: the feeder agent (ingestion scripts +
+   SharePoint connector) does design-time ingestion, HR agent tools do
+   execute-time retrieval, both through the same interface so a future swap
+   to Azure AI Search (Phase 7) is one factory-line change.
+   Tier 2/3 (private_document_chunks, tenant-scoped): every chunk carries
+   tenant_id + allowed_roles + sensitivity + classified_at (NULL = quarantine,
+   fail-closed). Retrieval filters on this metadata in the SQL WHERE clause
+   BEFORE the vector similarity ORDER BY — never after (the EchoLeak/Copilot
+   lesson, see Section 6, Rule 14). NOT YET: owner_employee_id-scoped chunks
+   for personally-owned (non-policy) documents — today's chunks are all
+   role-gated, not per-employee-owned.
+   document_id is canonicalized (knowledge/chunker.py::canonical_document_id)
+   across every ingestion path so the same document re-ingested via a
+   different path dedupes instead of accumulating duplicate chunks.
+   Tier 1 (public/legal reference data) — public_knowledge_chunks table
+   exists (no tenant_id, no RLS) but has no ingestion path yet; unused.
    Client-uploaded documents: human-classified, fail-CLOSED (most
-   restrictive label) if unclassified.
-   Tier 1 (public/legal reference data) — separate shared table, no
-   tenant_id, no RLS, same for every tenant.
+   restrictive label) if unclassified — labeling convention still applies,
+   not yet wired to a human-classification UI.
 
 8. LLM LAYER                                                [EXISTS — Claude/Grok swappable]
    claude.py is the ONLY file importing the Anthropic SDK. Stateless per
@@ -158,7 +169,7 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 | Security pattern | "Policy before prompt" — `ToolRegistry` filters tools by role BEFORE the LLM call, re-checks at execution, audits everything | Access control lives in tools/DB, never in the prompt |
 | Salary/math | Never done by the LLM — deterministic Python only | A wrong number on a legal document is a lawsuit |
 | Documents | Hardcoded fpdf templates, DB-driven slot-filling | LLM never invents content; consistent output every time |
-| RAG (future) | Metadata pre-filter (tenant_id + allowed_roles) BEFORE semantic search | The EchoLeak/Copilot lesson — filtering after search is too late |
+| RAG | Metadata pre-filter (tenant_id + allowed_roles) BEFORE semantic search — implemented in `PgvectorKnowledgeBase.search()`'s SQL WHERE clause | The EchoLeak/Copilot lesson — filtering after search is too late |
 | Prompt optimization | Offline only (DSPy/GEPA, frozen + human-reviewed artifact) — NEVER live self-modifying prompts | Live optimization is unauditable and a security risk (RBAC must never live near a prompt an optimizer can touch) |
 | Proactive/"Jarvis" layer | Staged: shadow-mode briefing -> goal tracking -> assisted execution via existing registry | Never an autonomous agent with general computer/file access |
 
@@ -204,12 +215,14 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 | **2** ✓ | JWT auth (`core/auth.py::decode_context`, replaces `build_context()` stub) — prerequisite for all privileged writes. `DEBUG_ALLOW_DEMO_ROLE` remains as a dev-only fallback, locked to `APP_ENV in (local, dev)` |
 | **2** ✓ | RLS enabled with FORCE on all tenant tables |
 | **2** ✓ | Full leave-management lifecycle: submit/eligibility/approve/reject/cancel, cancellation-of-approved-leave, team calendar, WIN Holding Leave Policy engine (17 types), constraint engine (hard/soft/advisory), appropriateness layer, bidirectional email approval agent, Odoo sync. ~283 passing tests |
+| **2** ✓ | Feeder-agent knowledge layer Phase 1: `KnowledgeBase` abstraction, `PgvectorKnowledgeBase`, Voyage AI embeddings + full-text fallback, SharePoint connector. See Section 2. |
 | **2** 🔲 next | Redis for session history (replaces in-memory _sessions dict) |
 | **2** 🔲 | Onboarding Phase 1: document-gen tools only (offer letter, bilingual employment contract, NDA, checklist) — no writes yet |
 | **2** 🔲 | Role/field RESTRICTIVE policies (Tier 3) — RLS today is tenant-scoped only, not yet role/field-scoped at the DB layer |
 | **2** 🔲 | ZDR agreement with Anthropic — pursue in parallel with open item #1 below |
+| **2** 🔲 | Knowledge layer follow-ups: document ingest API endpoint, Tier 1 `public_knowledge_chunks` ingestion path, `VOYAGE_API_KEY` documented as a hard registry-build dependency |
 | **3** 🔲 | Onboarding Phase 2: `onboarding_cases` state machine + gated writes (Rule 12) — can reuse the existing `pending_actions` table already proven by the leave-approval flow |
-| **3** 🔲 | RAG/knowledge layer — pgvector, metadata pre-filter, Tier 1/2/3 separation (Rule 14) |
+| **3** 🔲 | RAG/knowledge layer remainder — owner_employee_id-scoped personal documents, human-classification UI for uploads, Tier 1/2/3 separation completed (Rule 14) |
 | **3** 🔲 | Audit log hash-chaining + WORM mirror (Rule 8) |
 | **3** 🔲 | Field-level encryption for national_id, salary (blind index pattern, Section 5) |
 | **4** 🔲 | Database-per-tenant option for premium banking/gov clients |

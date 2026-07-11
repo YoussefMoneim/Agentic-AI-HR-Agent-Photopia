@@ -411,6 +411,7 @@ class SharePointConnector:
         3. Download + extract + ingest each changed file
         4. Store new delta token
         """
+        from knowledge.chunker import canonical_document_id
         from knowledge.factory import get_knowledge_base
 
         token = self._get_graph_client()
@@ -457,8 +458,9 @@ class SharePointConnector:
                     skipped += 1
                     continue
 
-                # Document name without extension
-                doc_name = Path(filename).stem
+                # Canonical form so this dedupes against the same document
+                # ingested via ingest_policies.py or any other path.
+                doc_name = canonical_document_id(filename)
 
                 # Build SharePoint URL for traceability
                 source_url = f"{self._site_url}{self._folder_path}/{filename}"

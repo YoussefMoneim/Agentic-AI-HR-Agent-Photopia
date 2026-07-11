@@ -1988,3 +1988,50 @@ class PostgreSQLDataSource(DataSource):
                 return {"allowed": True, "count": new_count, "blocked_until": None}
         finally:
             self._release(conn)
+
+    def get_email_session(self, tenant_id: str, thread_id: str) -> list[dict]:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT messages FROM email_conversation_sessions
+                    WHERE tenant_id = %s AND thread_id = %s
+                    """,
+                    (tenant_id, thread_id),
+                )
+                row = cur.fetchone()
+                return row["messages"] if row else []
+        finally:
+            self._release(conn)
+
+    def upsert_email_session(
+        self,
+        tenant_id: str,
+        thread_id: str,
+        employee_email: str,
+        messages: list[dict],
+        max_messages: int = 10,
+    ) -> None:
+        trimmed = messages[-max_messages:]
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO email_conversation_sessions
+                        (tenant_id, thread_id, employee_email, messages, last_message_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (tenant_id, thread_id)
+                    DO UPDATE SET
+                        messages = EXCLUDED.messages,
+                        employee_email = EXCLUDED.employee_email,
+                        last_message_at = NOW()
+                    """,
+                    (tenant_id, thread_id, employee_email.strip().lower(), json.dumps(trimmed)),
+                )
+            conn.commit()
+        finally:
+            self._release(conn)

@@ -28,8 +28,20 @@ def send_email(
     message_id: str | None = None,
     in_reply_to: str | None = None,
     reply_to: str | None = None,
+    references: str | None = None,
 ) -> bool:
-    """Send an email. Returns True on success, False on send failure."""
+    """Send an email. Returns True on success, False on send failure.
+
+    references (optional): full RFC 2822 References chain to set verbatim.
+    If omitted, falls back to using in_reply_to as a single-entry References
+    header (the old behaviour) — callers that track a stable thread anchor
+    (see services/email_agent.py::_send_reply) should always pass it, since
+    a single-entry References header gets silently truncated to just that
+    one ID on every hop, and after enough hops the true thread root drops
+    out of the chain the recipient's client sends back — causing our own
+    _extract_thread_id() to compute a brand-new (history-less) thread_id
+    mid-conversation.
+    """
 
     # ── Path 1: Azure Communication Services ─────────────────────────────────
     if config.AZURE_COMMUNICATION_CONNECTION_STRING:
@@ -37,12 +49,15 @@ def send_email(
 
     # ── Path 2: SMTP (smtplib, stdlib) ───────────────────────────────────────
     if config.SMTP_HOST and config.SMTP_USERNAME and config.SMTP_PASSWORD:
-        return _send_via_smtp(to_email, subject, body_html, body_plain, message_id, in_reply_to, reply_to)
+        return _send_via_smtp(
+            to_email, subject, body_html, body_plain, message_id, in_reply_to, reply_to, references,
+        )
 
     # ── Path 3: Mock (log only) ───────────────────────────────────────────────
     _log.info(
-        "EMAIL [mock] TO=%s | SUBJECT=%s | MESSAGE-ID=%s | IN-REPLY-TO=%s\n%s",
-        to_email, subject, message_id or "(none)", in_reply_to or "(none)", body_plain,
+        "EMAIL [mock] TO=%s | SUBJECT=%s | MESSAGE-ID=%s | IN-REPLY-TO=%s | REFERENCES=%s\n%s",
+        to_email, subject, message_id or "(none)", in_reply_to or "(none)",
+        references or "(none)", body_plain,
     )
     return True
 
@@ -96,6 +111,7 @@ def _send_via_smtp(
     message_id: str | None,
     in_reply_to: str | None = None,
     reply_to: str | None = None,
+    references: str | None = None,
 ) -> bool:
     try:
         msg = MIMEMultipart("alternative")
@@ -106,7 +122,8 @@ def _send_via_smtp(
             msg["Message-ID"] = message_id
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
-            msg["References"] = in_reply_to
+        if references or in_reply_to:
+            msg["References"] = references or in_reply_to
         if reply_to:
             msg["Reply-To"] = reply_to
 
