@@ -155,6 +155,37 @@ def test_rate_limit_blocks_reply():
         mock_get_reg.assert_not_called()
 
 
+def test_rate_limit_message_reflects_actual_enforced_limit():
+    """
+    Regression test: the reply text used to hardcode "maximum 5 per hour"
+    while the actually-enforced default (data/postgresql.py) was 10 — the
+    message and the real limit had silently drifted apart. The message must
+    now be built from whatever check_and_record_rate_limit() actually
+    reports, so it can never say a different number than what's enforced.
+    """
+    emp = _registered_employee()
+    ds = _make_ds(employee=emp, rate_ok=False)
+    ds.check_and_record_rate_limit.return_value = {
+        "allowed": False,
+        "count": 11,
+        "blocked_until": "2026-06-30 10:00:00+00",
+        "max_per_hour": 10,
+    }
+    with patch("services.email_agent.send_email") as mock_send:
+        with patch("services.email_agent._get_registry"):
+            with patch("services.email_agent.config") as mock_cfg:
+                mock_cfg.IMAP_USERNAME = ""
+                mock_cfg.SMTP_FROM_ADDRESS = "hr@fotopia.com"
+                mock_cfg.DATABASE_URL = "postgresql://test"
+                _call_agent(ds)
+
+    mock_send.assert_called_once()
+    _, kwargs = mock_send.call_args
+    assert "maximum 10 per hour" in kwargs["body_html"]
+    assert "max 10" in kwargs["body_plain"]
+    assert "maximum 5 per hour" not in kwargs["body_html"]
+
+
 # ── Test 5: Leave balance keyword routes to check_leave_balance tool ─────────────
 
 def test_leave_balance_keyword_routes_to_tool():

@@ -906,16 +906,19 @@ def process_employee_email(
             "email_agent: rate limit exceeded for %s (count=%d, blocked_until=%s)",
             from_email, rl["count"], rl.get("blocked_until"),
         )
+        # Read the actual enforced limit from the result rather than hardcoding a
+        # number here — the two used to drift (message said 5, enforcement was 10).
+        limit = rl.get("max_per_hour", 10)
         html = (
             f"<p style='color:#444;font-size:14px'>Dear {display_name},<br><br>"
-            f"You have sent too many requests in the last hour (maximum 5 per hour). "
+            f"You have sent too many requests in the last hour (maximum {limit} per hour). "
             f"Please try again later.</p>"
             f"<p style='color:#888;font-size:12px'>"
             f"For urgent requests, contact HR directly at "
             f"<a href='mailto:hr.agent.fotopia@gmail.com' style='color:#c9a84c'>hr.agent.fotopia@gmail.com</a></p>"
         )
         plain = (
-            f"Dear {display_name},\n\nToo many requests in the last hour (max 5). "
+            f"Dear {display_name},\n\nToo many requests in the last hour (max {limit}). "
             f"Please try again later or contact hr.agent.fotopia@gmail.com"
         )
         _send_reply(

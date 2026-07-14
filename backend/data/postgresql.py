@@ -1918,7 +1918,7 @@ class PostgreSQLDataSource(DataSource):
                         (tenant_id, sender),
                     )
                     conn.commit()
-                    return {"allowed": True, "count": 1, "blocked_until": None}
+                    return {"allowed": True, "count": 1, "blocked_until": None, "max_per_hour": max_per_hour}
 
                 row = dict(row)
 
@@ -1934,6 +1934,7 @@ class PostgreSQLDataSource(DataSource):
                             "allowed": False,
                             "count": row["request_count"],
                             "blocked_until": str(row["blocked_until"]),
+                            "max_per_hour": max_per_hour,
                         }
 
                 # Check if the 1-hour window has expired
@@ -1953,7 +1954,7 @@ class PostgreSQLDataSource(DataSource):
                         (tenant_id, sender),
                     )
                     conn.commit()
-                    return {"allowed": True, "count": 1, "blocked_until": None}
+                    return {"allowed": True, "count": 1, "blocked_until": None, "max_per_hour": max_per_hour}
 
                 # Increment within current window
                 new_count = row["request_count"] + 1
@@ -1974,6 +1975,7 @@ class PostgreSQLDataSource(DataSource):
                         "allowed": False,
                         "count": new_count,
                         "blocked_until": str(result["blocked_until"]),
+                        "max_per_hour": max_per_hour,
                     }
 
                 cur.execute(
@@ -1985,7 +1987,7 @@ class PostgreSQLDataSource(DataSource):
                     (tenant_id, sender),
                 )
                 conn.commit()
-                return {"allowed": True, "count": new_count, "blocked_until": None}
+                return {"allowed": True, "count": new_count, "blocked_until": None, "max_per_hour": max_per_hour}
         finally:
             self._release(conn)
 

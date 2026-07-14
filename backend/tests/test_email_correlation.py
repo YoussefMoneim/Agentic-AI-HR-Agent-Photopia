@@ -253,6 +253,54 @@ class TestDecisionParsing:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6. Rate limiting — real DB, real defaults
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestRateLimitMaxPerHourEchoed:
+    """
+    Regression test for a real drift bug: services/email_agent.py's rate-limit
+    reply hardcoded "maximum 5 per hour" while the actually-enforced default
+    here (data/postgresql.py::check_and_record_rate_limit) was 10 — nothing
+    kept the displayed number and the enforced number in sync. Now the result
+    dict echoes back whatever max_per_hour was actually used, so the caller
+    can build its message from that instead of a separate hardcoded literal.
+    """
+
+    def _cleanup(self, database_url, tenant_id, sender):
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
+                    cur.execute(
+                        "DELETE FROM email_agent_rate_limit WHERE tenant_id = %s AND sender_email = %s",
+                        (tenant_id, sender),
+                    )
+        finally:
+            conn.close()
+
+    def test_default_max_per_hour_is_echoed_back(self, ds, tenant_id, database_url):
+        sender = "rate-limit-echo-test@fotopia.ai"
+        self._cleanup(database_url, tenant_id, sender)
+        try:
+            result = ds.check_and_record_rate_limit(tenant_id, sender)
+            assert result["allowed"] is True
+            assert result["max_per_hour"] == 10  # the real default, not the old "5" the message used to claim
+        finally:
+            self._cleanup(database_url, tenant_id, sender)
+
+    def test_explicit_max_per_hour_is_echoed_back(self, ds, tenant_id, database_url):
+        sender = "rate-limit-echo-test-explicit@fotopia.ai"
+        self._cleanup(database_url, tenant_id, sender)
+        try:
+            result = ds.check_and_record_rate_limit(tenant_id, sender, max_per_hour=3)
+            assert result["max_per_hour"] == 3
+        finally:
+            self._cleanup(database_url, tenant_id, sender)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6. simulate-inbound HTTP endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 

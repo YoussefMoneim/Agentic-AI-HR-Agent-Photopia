@@ -361,12 +361,16 @@ class DataSource(ABC):
         self,
         tenant_id: str,
         sender_email: str,
-        max_per_hour: int = 5,
+        max_per_hour: int = 10,
         block_minutes: int = 60,
     ) -> dict:
         """Check and record rate limit for sender in email_agent_rate_limit.
-        Returns: {"allowed": bool, "count": int, "blocked_until": str | None}
-        Resets window after 1 hour. Blocks sender for block_minutes when count > max_per_hour."""
+        Returns: {"allowed": bool, "count": int, "blocked_until": str | None,
+                  "max_per_hour": int}
+        Resets window after 1 hour. Blocks sender for block_minutes when count > max_per_hour.
+        max_per_hour is echoed back in the result so callers can build a user-facing
+        message from it, rather than hardcoding a number that can drift out of sync
+        with whatever's actually enforced here."""
 
     @abstractmethod
     def get_email_session(self, tenant_id: str, thread_id: str) -> list[dict]:
