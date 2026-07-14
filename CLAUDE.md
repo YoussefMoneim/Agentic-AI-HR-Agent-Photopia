@@ -398,7 +398,8 @@ backend/
     postgresql.py          — _set_tenant() lives here — called before every query
   db/
     schema.sql             — Ground truth for table structure
-    migrations/            — Numbered migrations — always add RLS before merging
+    migrations/            — Numbered migrations — always add RLS before merging.
+                              See "Migration numbering convention" below.
   knowledge/
     base.py                — Abstract KnowledgeBase — always code to this interface
     pgvector_kb.py          — Concrete implementation — ingest(), search(), delete_document()
@@ -420,6 +421,33 @@ backend/
   workflow/
     policy_engine.py         — PolicyEngine — reads eligibility from KB at runtime
 ```
+
+### Migration numbering convention (agreed July 14, 2026 — multiple people building in parallel)
+
+Migrations are applied by `backend/scripts/reset_demo_environment.sh`, which globs
+`backend/db/migrations/*.sql` and runs every file in plain filename-sorted order —
+there is no persisted "already applied" tracking table. This means:
+
+- Ordering is determined **entirely by filename**, every time the script runs, regardless of
+  git merge order or when a file was actually written. Every migration file MUST stay
+  idempotent (`CREATE TABLE IF NOT EXISTS`, `DROP POLICY IF EXISTS` + recreate, etc.) so
+  re-running the whole directory is always safe.
+- **While multiple people have migrations in flight on separate branches at the same time**,
+  avoid two people picking the same number by splitting into ranges instead of
+  coordinating on every single file:
+  - Saif (and the normal/default sequence): continues the plain numbering — `021`, `022`, `023`...
+  - Youssef: uses `101`, `102`, `103`... while his branch and Saif's are both active, so neither
+    has to wait on the other to create a migration.
+  - Because `101+` always sorts after `021-099`, this also fixes dependency direction: a
+    migration in the `101+` range CAN safely depend on a table created in the `021-099` range
+    (it always applies later), but not the other way around — keep that in mind if a future
+    migration needs to reference something from the other range.
+- **Once both branches are merged**, whoever does it should renumber everything into one clean
+  sequential range — compress the gaps, but preserve the existing relative order between files
+  (don't reshuffle which migration ran before which; some later file may depend on an earlier
+  one's table/column already existing).
+- This convention is temporary, scoped to the current sprint's parallel work — once the branches
+  converge, go back to plain sequential numbering with the coordinate-before-creating rule.
 
 ---
 

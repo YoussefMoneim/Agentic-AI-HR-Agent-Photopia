@@ -90,9 +90,11 @@ class TestIdempotencyKey:
         because the idempotency_key is UNIQUE on pending_actions."""
         # Submit once — should succeed
         emp_ctx = ctx(role="employee")
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=2)
         result1 = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-15", "end_date": "2026-07-17",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "holiday"},
             emp_ctx,
         )
@@ -323,9 +325,11 @@ class TestApprovalRouting:
     def test_top_of_hierarchy_submit_sets_authz_note(self, registry, ctx):
         """An hr_manager with no manager above them self-approves with an audit flag."""
         mgr_ctx = ctx(role="hr_manager", employee_code="EMP002")
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=1)
         result = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-20", "end_date": "2026-07-21",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "top of hierarchy test"},
             mgr_ctx,
         )
@@ -341,9 +345,11 @@ class TestApprovalRouting:
 class TestAuditEntries:
 
     def _submit_lr(self, registry, ctx):
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=1)
         result = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-13", "end_date": "2026-07-14",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "audit entry test"},
             ctx(role="employee"),
         )
@@ -407,9 +413,11 @@ class TestWrongApproverDenied:
         """A manager who is NOT the assigned approver must be denied at execution time."""
         # Submit as employee (EMP001, assigned manager is EMP002)
         emp_ctx = ctx(role="employee")
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=1)
         submit = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-15", "end_date": "2026-07-16",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "wrong approver test"},
             emp_ctx,
         )
