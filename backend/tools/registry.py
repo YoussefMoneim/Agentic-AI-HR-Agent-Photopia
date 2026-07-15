@@ -93,6 +93,8 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         SubmitLeaveRequestTool,
     )
     from tools.policy import SearchPolicyTool
+    from tools.odoo_connect import ConnectOdooTool
+    from tools.knowledge_ingest import IngestPolicyDocumentTool
     from knowledge.factory import get_knowledge_base
 
     knowledge_base = get_knowledge_base()
@@ -132,5 +134,8 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         SensitivityAuditTool(data_source),
         # Calendar (1)
         GetTeamCalendarTool(data_source),
+        # Onboarding (2)
+        ConnectOdooTool(),
+        IngestPolicyDocumentTool(knowledge_base),
     ]
     return ToolRegistry(tools, audit_logger)

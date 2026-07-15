@@ -2037,3 +2037,78 @@ class PostgreSQLDataSource(DataSource):
             conn.commit()
         finally:
             self._release(conn)
+
+    def get_onboarding_session(self, tenant_id: str, session_id: str) -> dict | None:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT status, current_step, answers, started_by_user_id
+                    FROM onboarding_sessions
+                    WHERE tenant_id = %s AND session_id = %s
+                    """,
+                    (tenant_id, session_id),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+        finally:
+            self._release(conn)
+
+    def create_onboarding_session(
+        self, tenant_id: str, session_id: str, started_by_user_id: str
+    ) -> dict:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO onboarding_sessions
+                        (tenant_id, session_id, started_by_user_id)
+                    VALUES (%s, %s, %s)
+                    RETURNING status, current_step, answers, started_by_user_id
+                    """,
+                    (tenant_id, session_id, started_by_user_id),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return dict(row)
+        finally:
+            self._release(conn)
+
+    def update_onboarding_session(
+        self,
+        tenant_id: str,
+        session_id: str,
+        current_step: int | None = None,
+        status: str | None = None,
+        answers: dict | None = None,
+    ) -> None:
+        conn = self._conn()
+        try:
+            self._set_tenant(conn, tenant_id)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE onboarding_sessions
+                    SET current_step = COALESCE(%s, current_step),
+                        status = COALESCE(%s, status),
+                        answers = CASE WHEN %s::jsonb IS NULL THEN answers
+                                       ELSE answers || %s::jsonb END,
+                        completed_at = CASE WHEN %s = 'completed' THEN NOW()
+                                            ELSE completed_at END,
+                        updated_at = NOW()
+                    WHERE tenant_id = %s AND session_id = %s
+                    """,
+                    (
+                        current_step, status,
+                        json.dumps(answers) if answers is not None else None,
+                        json.dumps(answers) if answers is not None else None,
+                        status, tenant_id, session_id,
+                    ),
+                )
+            conn.commit()
+        finally:
+            self._release(conn)

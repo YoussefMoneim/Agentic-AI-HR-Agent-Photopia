@@ -130,6 +130,7 @@ class ChatResponse(BaseModel):
     response: str
     documents: list[DocumentInfo]
     session_id: str
+    awaiting_upload: bool = False
 
 
 @app.get("/health")
@@ -266,6 +267,20 @@ def _build_context(authorization: str | None, demo_role_override: str | None) ->
 def chat(body: ChatRequest, authorization: str | None = Header(default=None)):
     ctx = _build_context(authorization, body.demo_role)
     session_id = body.session_id or str(_uuid.uuid4())
+
+    # Onboarding is a separate, deterministic code path — not the LLM tool-use
+    # loop below — so a fixed 5-question interview can't be derailed by the
+    # model deciding to do something else. See agent/onboarding.py.
+    from agent import onboarding
+    onboarding_reply = onboarding.maybe_handle_turn(body.message, ctx, session_id, _data_source, _registry)
+    if onboarding_reply is not None:
+        return ChatResponse(
+            response=onboarding_reply.text,
+            documents=[],
+            session_id=session_id,
+            awaiting_upload=onboarding_reply.awaiting_upload,
+        )
+
     prior_messages = _sessions.get(session_id, [])
 
     result = orchestrator.run(body.message, ctx, _llm, _registry, prior_messages=prior_messages)
@@ -276,6 +291,38 @@ def chat(body: ChatRequest, authorization: str | None = Header(default=None)):
         response=result.text,
         documents=[DocumentInfo(**d) for d in result.documents],
         session_id=session_id,
+    )
+
+
+@app.post("/api/onboarding/{session_id}/upload", response_model=ChatResponse)
+async def onboarding_upload(
+    session_id: str,
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    """Handbook / leave-policy upload for onboarding steps 4-5.
+
+    This is the interactive equivalent of ingest_policies.py's one-time
+    bootstrap path (see ADR-006) — scoped specifically to a new tenant's
+    day-1 onboarding, not a general-purpose upload feature. It must never be
+    confused with /api/documents/upload-demo (a separate, unrelated
+    sensitivity-scanning demo feature stored in demo_documents)."""
+    if not _data_source:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    ctx = _build_context(authorization, None)
+
+    from agent import onboarding
+    raw = await file.read()
+    content_text = _extract_text_from_upload(file.filename or "upload.txt", raw)
+    reply = onboarding.handle_document_upload(
+        content_text, file.filename or "upload.txt", ctx, session_id, _data_source, _registry,
+    )
+
+    return ChatResponse(
+        response=reply.text,
+        documents=[],
+        session_id=session_id,
+        awaiting_upload=reply.awaiting_upload,
     )
 
 

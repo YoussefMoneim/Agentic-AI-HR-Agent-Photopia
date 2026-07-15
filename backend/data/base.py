@@ -389,3 +389,30 @@ class DataSource(ABC):
     ) -> None:
         """Create or update the turn history for an email thread.
         Keeps only the last max_messages turns (oldest trimmed first)."""
+
+    @abstractmethod
+    def get_onboarding_session(self, tenant_id: str, session_id: str) -> dict | None:
+        """Return the onboarding interview state for this chat session_id,
+        or None if no interview has been started for it yet.
+        Returns: {status, current_step, answers, started_by_user_id}"""
+
+    @abstractmethod
+    def create_onboarding_session(
+        self, tenant_id: str, session_id: str, started_by_user_id: str
+    ) -> dict:
+        """Create a new onboarding session at step 1, status='in_progress'.
+        Returns the same shape as get_onboarding_session()."""
+
+    @abstractmethod
+    def update_onboarding_session(
+        self,
+        tenant_id: str,
+        session_id: str,
+        current_step: int | None = None,
+        status: str | None = None,
+        answers: dict | None = None,
+    ) -> None:
+        """Update an existing onboarding session. Only non-None fields are
+        changed; answers is shallow-merged into the existing JSONB, never
+        replaced wholesale. Setting status='completed' also stamps
+        completed_at."""

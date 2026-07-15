@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import ChatInterface from './components/ChatInterface.jsx'
+import ChatInterface, { SESSION_STORAGE_KEY } from './components/ChatInterface.jsx'
+import Sidebar from './components/Sidebar.jsx'
 import AuditLog from './components/AuditLog.jsx'
 import ApprovalInbox from './components/ApprovalInbox.jsx'
 import DocumentLibrary from './components/DocumentLibrary.jsx'
@@ -30,16 +31,28 @@ export default function App() {
   const [pendingCount, setPendingCount] = useState(0)
 
   function handleLogin(userData) {
+    // A fresh login (password submit or quick-login) always starts clean —
+    // this also covers the case where a JWT expired without an explicit
+    // logout and a different person then logs in on the same browser.
+    localStorage.removeItem(SESSION_STORAGE_KEY)
     setUser(userData)
     setResetKey(k => k + 1)
   }
 
   function handleLogout() {
     logout()
+    // Otherwise the next person to log in on this browser would resume this
+    // user's raw chat session — the backend trusts session_id alone.
+    localStorage.removeItem(SESSION_STORAGE_KEY)
     setUser(null)
     setResetKey(k => k + 1)
     setRightPanel('audit')
     setPendingCount(0)
+  }
+
+  function handleNewThread() {
+    localStorage.removeItem(SESSION_STORAGE_KEY)
+    setResetKey(k => k + 1)
   }
 
   if (!user) {
@@ -179,8 +192,10 @@ export default function App() {
 
       </header>
 
-      {/* ── Body: chat + inbox/audit log ───────────────────────────────── */}
+      {/* ── Body: sidebar + chat + inbox/audit log ─────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+        <Sidebar onNewThread={handleNewThread} />
 
         {/* Chat panel (~60%) */}
         <div style={{ flex: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #1a1d2e' }}>

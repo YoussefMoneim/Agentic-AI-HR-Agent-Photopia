@@ -1,20 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchPendingCount, sendChat } from '../api.js'
+import AgentPicker from './AgentPicker/index.jsx'
 import MessageBubble from './MessageBubble.jsx'
+import OnboardingUploadButton from '../onboarding/OnboardingUploadButton.jsx'
 
+// Exported so App.jsx can clear it on logout — otherwise the next person to
+// log in on this browser would resume the previous user's raw conversation
+// (the backend's _sessions dict trusts session_id alone, with no per-user
+// ownership check).
+export const SESSION_STORAGE_KEY = 'hr_agent_chat_session_id'
+
+// HR-specific quick actions only — no generic content-gen buttons.
+// "Set up your agent" is HR/admin-only and rendered separately (see
+// SetupAgentButton below), matching the backend's own role gate.
 const QUICK_ACTIONS = {
   employee: [
-    'Check my leave balance',
-    'Request 3 days annual leave July 1-3',
-    'Show my leave requests',
-    "What is Saif Ahmed's employee profile?",
-    'Generate a salary certificate for Saif Ahmed',
+    'Ask a policy question',
+    'Submit leave',
   ],
   hr_manager: [
-    'Show pending approvals',
-    "What is Saif Ahmed's employee profile?",
-    'List all employees',
-    'Generate a salary certificate for Saif Ahmed',
+    'Ask a policy question',
+    'View pending approvals',
   ],
 }
 
@@ -31,7 +37,10 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [sessionId, setSessionId] = useState(null)
+  // Persisted so a mid-onboarding browser refresh resumes the same
+  // conversation instead of silently starting a new one.
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_STORAGE_KEY) || null)
+  const [awaitingUpload, setAwaitingUpload] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -63,7 +72,11 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
 
     try {
       const data = await sendChat(msg, sessionId, demoRole)
-      if (data.session_id && !sessionId) setSessionId(data.session_id)
+      if (data.session_id && !sessionId) {
+        setSessionId(data.session_id)
+        localStorage.setItem(SESSION_STORAGE_KEY, data.session_id)
+      }
+      setAwaitingUpload(!!data.awaiting_upload)
       setMessages(prev => [
         ...prev,
         { id: Date.now() + 1, role: 'agent', text: data.response, documents: data.documents || [] },
@@ -86,7 +99,26 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
     }
   }
 
+  function handleUploaded(data) {
+    setAwaitingUpload(!!data.awaiting_upload)
+    setMessages(prev => [
+      ...prev,
+      { id: Date.now(), role: 'agent', text: data.response, documents: data.documents || [] },
+    ])
+  }
+
+  function handleUploadError(err) {
+    setMessages(prev => [
+      ...prev,
+      { id: Date.now(), role: 'agent', text: `Upload failed: ${err.message}`, documents: [] },
+    ])
+  }
+
   const actions = QUICK_ACTIONS[demoRole] || QUICK_ACTIONS.hr_manager
+  // Must match agent/onboarding.py's own gate exactly — hr_staff is part of
+  // HR_ROLES (gets onInboxToggle) but NOT allowed to set up an agent, so
+  // this can't just reuse onInboxToggle's truthiness.
+  const canSetUpAgent = demoRole === 'hr_manager' || demoRole === 'admin'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -126,6 +158,11 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
       {/* ── Input + quick actions ──────────────────────────────────────── */}
       <div style={{ padding: '0 16px 16px', background: '#0f1117', borderTop: '1px solid #1a1d2e' }}>
 
+        {/* Agent picker */}
+        <div style={{ marginTop: '12px' }}>
+          <AgentPicker />
+        </div>
+
         {/* Text input */}
         <div style={{
           display: 'flex',
@@ -135,14 +172,14 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
           borderRadius: '14px',
           padding: '10px 14px',
           alignItems: 'flex-end',
-          marginTop: '12px',
+          marginTop: '10px',
         }}>
           <textarea
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKey}
-            placeholder={`Message as ${displayName}…`}
+            placeholder="What would you like to do?"
             rows={1}
             style={{
               flex: 1,
@@ -158,6 +195,14 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
               overflowY: 'auto',
             }}
           />
+          {awaitingUpload && (
+            <OnboardingUploadButton
+              sessionId={sessionId}
+              disabled={loading}
+              onUploaded={handleUploaded}
+              onError={handleUploadError}
+            />
+          )}
           <button
             onClick={() => handleSend()}
             disabled={!input.trim() || loading}
@@ -218,6 +263,30 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
           </button>
         )}
 
+        {/* "Set up your agent" — HR/admin only, visually distinct from the
+            regular quick-action pills below (same handleSend call, just
+            more prominent, matching the backend's own role gate). */}
+        {canSetUpAgent && (
+          <button
+            onClick={() => handleSend('Set up your agent')}
+            disabled={loading}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '8px',
+              width: '100%', marginTop: '10px', padding: '10px 14px',
+              background: '#1e1a4e', border: '1px solid #4f46e5',
+              borderRadius: '10px', color: '#c7d2fe',
+              fontSize: '13px', fontWeight: 600,
+              cursor: loading ? 'default' : 'pointer',
+              fontFamily: 'inherit', transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#28226b' }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#1e1a4e' }}
+          >
+            <SetupIcon />
+            Set up your agent
+          </button>
+        )}
+
         {/* Quick-action pills */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
           {actions.map(action => (
@@ -273,6 +342,14 @@ function TypingDots() {
         }} />
       ))}
     </span>
+  )
+}
+
+function SetupIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2l2.4 7.2H22l-6 4.4 2.3 7.2-6.3-4.5L5.7 21l2.3-7.2-6-4.4h7.6z" />
+    </svg>
   )
 }
 
