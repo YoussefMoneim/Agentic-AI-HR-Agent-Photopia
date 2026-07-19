@@ -1,30 +1,20 @@
-import { useRef, useState } from 'react'
-import { uploadOnboardingDocument } from './uploadApi.js'
+import { useRef } from 'react'
 
-// Shown next to the composer whenever the backend reports awaiting_upload —
-// the attach affordance for onboarding steps 4/5 (handbook / leave policy).
-// Still "talking to the agent": the resulting reply is appended to the same
-// chat thread, just triggered by a file picker instead of typed text.
-export default function OnboardingUploadButton({ sessionId, disabled, onUploaded, onError }) {
-  const [uploading, setUploading] = useState(false)
+// Just the file picker — selecting file(s) stages them (onFilesSelected)
+// rather than uploading immediately. The actual upload happens when the
+// user hits Send, at the same time as any typed text, so they can compose a
+// message, attach one or more files (multiple selected at once, or the
+// button clicked again to add more), remove any before sending, and send
+// everything together — see ChatInterface.jsx's handleSend / stagedFiles.
+export default function OnboardingUploadButton({ disabled, onFilesSelected }) {
   const inputRef = useRef(null)
 
-  async function handleFile(e) {
-    const file = e.target.files?.[0]
-    e.target.value = '' // allow re-selecting the same file next time
-    if (!file) return
-    setUploading(true)
-    try {
-      const data = await uploadOnboardingDocument(sessionId, file)
-      onUploaded(data)
-    } catch (err) {
-      onError(err)
-    } finally {
-      setUploading(false)
-    }
+  function handleFile(e) {
+    const files = Array.from(e.target.files || [])
+    e.target.value = '' // allow re-selecting the same file(s) next time
+    if (!files.length) return
+    onFilesSelected(files)
   }
-
-  const isDisabled = disabled || uploading
 
   return (
     <>
@@ -32,36 +22,34 @@ export default function OnboardingUploadButton({ sessionId, disabled, onUploaded
         ref={inputRef}
         type="file"
         accept=".pdf,.docx,.doc,.txt"
+        multiple
         style={{ display: 'none' }}
         onChange={handleFile}
       />
       <button
         onClick={() => inputRef.current?.click()}
-        disabled={isDisabled}
+        disabled={disabled}
         title="Attach a document"
         style={{
           width: 36, height: 36,
           borderRadius: '10px',
-          background: isDisabled ? '#1a1d2e' : '#13151f',
+          background: disabled ? '#1a1d2e' : '#13151f',
           border: '1px solid #252b42',
-          color: isDisabled ? '#444' : '#a5b4fc',
-          cursor: isDisabled ? 'default' : 'pointer',
+          color: disabled ? '#444' : '#a5b4fc',
+          cursor: disabled ? 'default' : 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <PaperclipIcon spinning={uploading} />
+        <PaperclipIcon />
       </button>
     </>
   )
 }
 
-function PaperclipIcon({ spinning }) {
+function PaperclipIcon() {
   return (
-    <svg
-      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-      style={spinning ? { animation: 'spin 0.9s linear infinite' } : undefined}
-    >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21.44 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 015 5l-9.2 9.19a1.5 1.5 0 01-2.12-2.12l8.49-8.48" />
     </svg>
   )

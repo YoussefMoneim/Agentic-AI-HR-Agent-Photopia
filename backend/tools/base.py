@@ -29,6 +29,16 @@ class ToolSpec:
     description: str        # shown to the LLM so it knows when to call this tool
     input_schema: dict      # JSON Schema for the tool's parameters; the LLM uses this to form its call
     allowed_roles: list[str] = field(default_factory=list)
+    llm_visible: bool = True
+    # False = never offered to the LLM tool-use loop (orchestrator.run()) as
+    # something it can autonomously decide to call — only reachable via a
+    # direct ToolRegistry.execute(name, ...) from deterministic code (e.g.
+    # agent/onboarding.py). Still fully executable either way; this only
+    # controls what get_specs_for_role() hands to the model. Exists because
+    # connect_odoo/ingest_policy_document were being picked by the general
+    # chat agent on its own initiative from casual phrasing like "connect it
+    # to Odoo" — bypassing the onboarding state machine's gating entirely
+    # and then the model fabricating an "onboarding complete" claim on top.
 
     def to_claude_format(self) -> dict:
         return {

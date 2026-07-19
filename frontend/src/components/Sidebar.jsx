@@ -1,23 +1,9 @@
-import { useState } from 'react'
-
-// Week-1 simplification, stated explicitly: Threads is a local list this
-// component maintains itself — there's no thread-persistence backend yet.
-// Clicking "+ New thread" is the only entry that does something real (it
-// remounts ChatInterface via onNewThread, which also clears the persisted
-// chat session); clicking an older thread row only highlights it, it
-// doesn't restore that conversation's content. Agents is a single fixed
-// entry for the same reason — no agent_configs table exists yet.
-export default function Sidebar({ onNewThread }) {
-  const [threads, setThreads] = useState([{ id: 1, label: 'New conversation' }])
-  const [activeThreadId, setActiveThreadId] = useState(1)
-
-  function handleNewThread() {
-    const id = Date.now()
-    setThreads(prev => [{ id, label: 'New conversation' }, ...prev])
-    setActiveThreadId(id)
-    onNewThread()
-  }
-
+// Threads are owned by App.jsx (each with its own sessionId + messages,
+// persisted to localStorage) so switching between them shows that thread's
+// OWN conversation, not a shared/reset state — this component just renders
+// the list and reports clicks upward. Agents is a single fixed entry — no
+// agent_configs table exists yet.
+export default function Sidebar({ threads, activeThreadId, onNewThread, onSelectThread }) {
   return (
     <div style={{
       width: 220, flexShrink: 0, background: '#0a0c14',
@@ -26,7 +12,7 @@ export default function Sidebar({ onNewThread }) {
     }}>
       <div style={{ padding: '14px 12px 8px' }}>
         <button
-          onClick={handleNewThread}
+          onClick={onNewThread}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
             width: '100%', padding: '9px 12px',
@@ -46,7 +32,7 @@ export default function Sidebar({ onNewThread }) {
         {threads.map(t => (
           <button
             key={t.id}
-            onClick={() => setActiveThreadId(t.id)}
+            onClick={() => onSelectThread(t.id)}
             style={{
               display: 'block', width: '100%', textAlign: 'left',
               padding: '7px 10px', marginBottom: '2px', borderRadius: '7px',

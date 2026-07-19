@@ -87,3 +87,17 @@ class TestIngestPolicyDocumentTool:
         )
         assert result.success is False
         mock_kb.ingest.assert_not_called()
+
+    def test_not_offered_to_llm_tool_use_loop(self):
+        """Same regression as ConnectOdooTool — must never be autonomously
+        callable by the general chat agent, only via direct execute() from
+        agent/onboarding.py."""
+        from tools.registry import ToolRegistry
+        from audit.logger import AuditLogger
+
+        assert IngestPolicyDocumentTool.spec.llm_visible is False
+
+        mock_kb = MagicMock()
+        registry = ToolRegistry([IngestPolicyDocumentTool(mock_kb)], MagicMock(spec=AuditLogger))
+        specs = registry.get_specs_for_role("hr_manager")
+        assert all(s["name"] != "ingest_policy_document" for s in specs)

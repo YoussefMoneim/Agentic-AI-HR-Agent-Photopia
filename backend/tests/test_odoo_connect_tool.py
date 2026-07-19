@@ -89,3 +89,31 @@ class TestConnectOdooTool:
         result = registry.execute("connect_odoo", {}, _ctx(role="employee"))
         assert result.success is False
         assert "not permitted" in result.error.lower()
+
+    def test_not_offered_to_llm_tool_use_loop(self):
+        """
+        Regression test for a real bug: the general chat agent picked
+        connect_odoo as an available tool from casual phrasing like "connect
+        it to Odoo" — completely bypassing agent/onboarding.py's state
+        machine — then fabricated an "onboarding complete" claim on top.
+        connect_odoo must never appear in get_specs_for_role()'s output,
+        even for a role that's otherwise allowed to call it directly.
+        """
+        from tools.registry import ToolRegistry
+        from tools.odoo_connect import ConnectOdooTool
+        from audit.logger import AuditLogger
+
+        assert ConnectOdooTool.spec.llm_visible is False
+
+        registry = ToolRegistry([ConnectOdooTool()], MagicMock(spec=AuditLogger))
+        specs = registry.get_specs_for_role("hr_manager")
+        assert all(s["name"] != "connect_odoo" for s in specs)
+
+        # Still directly executable by name — onboarding.py's own calls must
+        # keep working; only LLM auto-discovery is blocked.
+        with patch(
+            "tools.odoo_connect.test_and_summarize_connection",
+            return_value={"connected": True, "employee_count": 5, "error": None},
+        ):
+            result = registry.execute("connect_odoo", {}, _ctx())
+        assert result.success is True

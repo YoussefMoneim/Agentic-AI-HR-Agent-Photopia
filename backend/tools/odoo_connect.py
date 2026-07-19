@@ -19,6 +19,7 @@ class ConnectOdooTool(Tool):
         ),
         input_schema={"type": "object", "properties": {}},
         allowed_roles=["hr_manager", "admin"],
+        llm_visible=False,  # only agent/onboarding.py calls this, via direct execute()
     )
 
     def execute(self, input: dict, ctx: ToolContext) -> ToolResult:

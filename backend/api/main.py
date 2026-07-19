@@ -272,7 +272,7 @@ def chat(body: ChatRequest, authorization: str | None = Header(default=None)):
     # loop below — so a fixed 5-question interview can't be derailed by the
     # model deciding to do something else. See agent/onboarding.py.
     from agent import onboarding
-    onboarding_reply = onboarding.maybe_handle_turn(body.message, ctx, session_id, _data_source, _registry)
+    onboarding_reply = onboarding.maybe_handle_turn(body.message, ctx, session_id, _data_source, _registry, _llm)
     if onboarding_reply is not None:
         return ChatResponse(
             response=onboarding_reply.text,
@@ -315,7 +315,7 @@ async def onboarding_upload(
     raw = await file.read()
     content_text = _extract_text_from_upload(file.filename or "upload.txt", raw)
     reply = onboarding.handle_document_upload(
-        content_text, file.filename or "upload.txt", ctx, session_id, _data_source, _registry,
+        content_text, file.filename or "upload.txt", ctx, session_id, _data_source, _registry, _llm,
     )
 
     return ChatResponse(

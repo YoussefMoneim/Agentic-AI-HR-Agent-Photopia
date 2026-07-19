@@ -27,6 +27,7 @@ class IngestPolicyDocumentTool(Tool):
             "required": ["content", "document_name"],
         },
         allowed_roles=["hr_manager", "admin"],
+        llm_visible=False,  # only agent/onboarding.py calls this, via direct execute()
     )
 
     def __init__(self, knowledge_base: KnowledgeBase) -> None:

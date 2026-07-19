@@ -74,6 +74,14 @@ const USER_STYLE = {
   hr_manager: { bg: '#28154a', border: '#3e1e6e' },
 }
 
+function PaperclipIconTiny() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+      <path d="M21.44 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 015 5l-9.2 9.19a1.5 1.5 0 01-2.12-2.12l8.49-8.48" />
+    </svg>
+  )
+}
+
 export default function MessageBubble({ message, demoRole }) {
   const isUser = message.role === 'user'
   const userStyle = USER_STYLE[demoRole] || USER_STYLE.hr_manager
@@ -109,7 +117,25 @@ export default function MessageBubble({ message, demoRole }) {
           wordBreak: 'break-word',
         }}>
           {isUser ? (
-            <span style={{ whiteSpace: 'pre-wrap' }}>{message.text}</span>
+            <>
+              {message.attachedFileNames?.length > 0 && (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: '3px',
+                  marginBottom: message.text ? '8px' : 0,
+                }}>
+                  {message.attachedFileNames.map((name, i) => (
+                    <div key={`${name}-${i}`} style={{
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                      fontSize: '12px', color: '#c8c8d8', opacity: 0.85,
+                    }}>
+                      <PaperclipIconTiny />
+                      {name}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {message.text && <span style={{ whiteSpace: 'pre-wrap' }}>{message.text}</span>}
+            </>
           ) : (
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
               {message.text}

@@ -16,10 +16,13 @@ class ToolRegistry:
     def get_specs_for_role(self, role: str) -> list[dict]:
         # Policy before prompt: filter BEFORE sending to the LLM so it never
         # even knows about tools it can't call — can't be tricked into requesting them.
+        # llm_visible=False tools are excluded here regardless of role — they
+        # exist for direct execute() calls from deterministic code only, never
+        # for the model to pick on its own initiative.
         return [
             t.spec.to_claude_format()
             for t in self._tools.values()
-            if role in t.spec.allowed_roles
+            if role in t.spec.allowed_roles and t.spec.llm_visible
         ]
 
     def execute(self, tool_name: str, tool_input: dict, ctx: ToolContext) -> ToolResult:
