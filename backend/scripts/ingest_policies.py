@@ -30,6 +30,7 @@ if not DATABASE_URL:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
+from knowledge.chunker import canonical_document_id
 from knowledge.factory import get_knowledge_base
 
 POLICIES_DIR = Path(__file__).parent.parent / "policies"
@@ -84,8 +85,9 @@ def main():
             print(f"  {md_file.name}: skipped (unknown dir '{parent_dir}')")
             continue
 
-        # Use stem as document_id for consistency with existing convention
-        document_name = md_file.stem
+        # Canonical form so re-ingesting the same document via SharePoint or
+        # any other path dedupes against this one (see chunker.py).
+        document_name = canonical_document_id(md_file.stem)
         source_url = str(md_file.relative_to(POLICIES_DIR.parent))
 
         print(f"  {md_file.name} ({len(content)} chars)...")

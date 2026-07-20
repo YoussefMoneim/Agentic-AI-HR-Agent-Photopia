@@ -21,6 +21,7 @@ WFH policy: max 2 days/week, max 8 days/month.
 
 from datetime import date, timedelta
 
+import config
 from tests.conftest import get_pending_days, get_used_days
 from tools.leave import (
     ApproveLeaveRequestTool,
@@ -43,10 +44,26 @@ ANNUAL_START = "2026-08-18"
 ANNUAL_END   = "2026-08-20"   # 3 days
 ANNUAL_DAYS  = 3
 
-OVERLAP_START = "2026-07-15"
-OVERLAP_END   = "2026-07-17"  # 3 days (Wed–Fri) – used for overlap detection test
-OVERLAP_LATER_START = "2026-07-16"
-OVERLAP_LATER_END   = "2026-07-21"  # overlaps first request on Jul 16–17
+def _working_days_from_today(n: int) -> date:
+    """Egypt work week: Sun-Thu, weekend is Friday+Saturday (config.EGYPT_WEEKEND_DAYS).
+    Anchors the overlap-test dates far enough out to always clear the 7-working-day
+    notice requirement for >3-day annual leave, regardless of when "today" is."""
+    weekend = set(getattr(config, "EGYPT_WEEKEND_DAYS", [4, 5]))
+    holidays = {date.fromisoformat(h) for h in getattr(config, "EGYPT_PUBLIC_HOLIDAYS_2026", [])}
+    d = date.today()
+    count = 0
+    while count < n:
+        d += timedelta(days=1)
+        if d.weekday() not in weekend and d not in holidays:
+            count += 1
+    return d
+
+
+_OVERLAP_ANCHOR = _working_days_from_today(8)  # safely past the 7-working-day notice threshold
+OVERLAP_START = _OVERLAP_ANCHOR.isoformat()
+OVERLAP_END   = (_OVERLAP_ANCHOR + timedelta(days=2)).isoformat()  # 3-day span – used for overlap detection test
+OVERLAP_LATER_START = (_OVERLAP_ANCHOR + timedelta(days=1)).isoformat()
+OVERLAP_LATER_END   = (_OVERLAP_ANCHOR + timedelta(days=6)).isoformat()  # overlaps first request
 
 WFH_WEEK1_START = "2026-08-03"  # Monday
 WFH_WEEK1_END   = "2026-08-04"  # Tuesday – 2 days (reaches weekly limit)

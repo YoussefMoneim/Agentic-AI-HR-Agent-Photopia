@@ -192,6 +192,7 @@ TENANT_TABLES = [
     "users", "employees", "leave_types", "leave_balances",
     "leave_requests", "leave_policies", "workflow_instances",
     "pending_actions", "workflow_events", "audit_log",
+    "onboarding_sessions",
 ]
 
 

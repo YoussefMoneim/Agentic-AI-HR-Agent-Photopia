@@ -28,6 +28,23 @@ import config
 from tests.conftest import get_pending_days
 
 
+def _working_days_from_today(n: int) -> date:
+    """Return the date that is n working days from today.
+    Matches tools.leave._add_working_days()'s exact locale rules (Egypt
+    work week via config.EGYPT_WEEKEND_DAYS, config.EGYPT_PUBLIC_HOLIDAYS_2026)
+    so test dates satisfy the same notice-period check the tool enforces,
+    regardless of which day "today" happens to be."""
+    weekend = set(getattr(config, "EGYPT_WEEKEND_DAYS", [4, 5]))
+    holidays = {date.fromisoformat(h) for h in getattr(config, "EGYPT_PUBLIC_HOLIDAYS_2026", [])}
+    d = date.today()
+    count = 0
+    while count < n:
+        d += timedelta(days=1)
+        if d.weekday() not in weekend and d not in holidays:
+            count += 1
+    return d
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # workflow_events RLS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -73,9 +90,11 @@ class TestIdempotencyKey:
         because the idempotency_key is UNIQUE on pending_actions."""
         # Submit once — should succeed
         emp_ctx = ctx(role="employee")
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=2)
         result1 = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-15", "end_date": "2026-07-17",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "holiday"},
             emp_ctx,
         )
@@ -127,7 +146,7 @@ class TestCorrelationTokenResume:
 
     def _submit_and_get_token(self, registry, ctx, database_url, tenant_id):
         emp_ctx = ctx(role="employee")
-        start = date.today() + timedelta(days=2)
+        start = _working_days_from_today(2)
         end = start + timedelta(days=2)
         result = registry.execute(
             "submit_leave_request",
@@ -201,7 +220,7 @@ class TestWorkflowSync:
 
     def _submit_and_get_lr_id(self, registry, ctx):
         emp_ctx = ctx(role="employee")
-        start = date.today() + timedelta(days=2)
+        start = _working_days_from_today(2)
         end = start + timedelta(days=1)
         result = registry.execute(
             "submit_leave_request",
@@ -306,9 +325,11 @@ class TestApprovalRouting:
     def test_top_of_hierarchy_submit_sets_authz_note(self, registry, ctx):
         """An hr_manager with no manager above them self-approves with an audit flag."""
         mgr_ctx = ctx(role="hr_manager", employee_code="EMP002")
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=1)
         result = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-20", "end_date": "2026-07-21",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "top of hierarchy test"},
             mgr_ctx,
         )
@@ -324,9 +345,11 @@ class TestApprovalRouting:
 class TestAuditEntries:
 
     def _submit_lr(self, registry, ctx):
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=1)
         result = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-13", "end_date": "2026-07-14",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "audit entry test"},
             ctx(role="employee"),
         )
@@ -390,9 +413,11 @@ class TestWrongApproverDenied:
         """A manager who is NOT the assigned approver must be denied at execution time."""
         # Submit as employee (EMP001, assigned manager is EMP002)
         emp_ctx = ctx(role="employee")
+        start = _working_days_from_today(2)
+        end = start + timedelta(days=1)
         submit = registry.execute(
             "submit_leave_request",
-            {"leave_type_code": "annual", "start_date": "2026-07-15", "end_date": "2026-07-16",
+            {"leave_type_code": "annual", "start_date": start.isoformat(), "end_date": end.isoformat(),
              "reason": "wrong approver test"},
             emp_ctx,
         )

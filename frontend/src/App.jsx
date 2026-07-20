@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ChatInterface from './components/ChatInterface.jsx'
+import Sidebar from './components/Sidebar.jsx'
 import AuditLog from './components/AuditLog.jsx'
 import ApprovalInbox from './components/ApprovalInbox.jsx'
 import DocumentLibrary from './components/DocumentLibrary.jsx'
@@ -23,28 +24,86 @@ const HR_ROLES = new Set(['hr_staff', 'hr_manager', 'admin'])
 // Matches the backend's actual restriction on /api/knowledge/* — hr_manager/admin only, not hr_staff.
 const KNOWLEDGE_SYNC_ROLES = new Set(['hr_manager', 'admin'])
 
+// Each thread carries its OWN sessionId + messages + awaitingUpload — this
+// is what makes separate threads actually separate (a single shared
+// session_id used to mean "New thread"/switching threads collapsed
+// everything into one conversation). Persisted as one JSON blob so
+// switching threads, or refreshing the page, doesn't lose any of them.
+const THREADS_STORAGE_KEY = 'hr_agent_threads_v1'
+
+function freshThread(id, label) {
+  // sessionId is generated up front, not left null until the first chat
+  // message — otherwise attaching a file as the very first action (before
+  // ever sending text) sends the literal string "null" as the session_id
+  // in the upload URL. The backend already tolerates a client-supplied
+  // session_id it's never seen (/chat creates it on first use), so this is
+  // safe for both the chat and upload paths.
+  return { id, label, sessionId: crypto.randomUUID(), messages: null, awaitingUpload: false }
+}
+
+function loadThreadsFromStorage() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(THREADS_STORAGE_KEY))
+    if (parsed?.threads?.length) return parsed
+  } catch { /* corrupt or missing — fall through to a fresh start */ }
+  return null
+}
+
 export default function App() {
   const [user, setUser] = useState(() => getStoredUser())
-  const [resetKey, setResetKey] = useState(0)
+  const [threads, setThreads] = useState(() => loadThreadsFromStorage()?.threads ?? [freshThread(1, 'Conversation 1')])
+  const [activeThreadId, setActiveThreadId] = useState(() => loadThreadsFromStorage()?.activeThreadId ?? 1)
   const [rightPanel, setRightPanel] = useState('audit') // 'audit' | 'documents' | 'inbox'
   const [pendingCount, setPendingCount] = useState(0)
 
+  useEffect(() => {
+    localStorage.setItem(THREADS_STORAGE_KEY, JSON.stringify({ threads, activeThreadId }))
+  }, [threads, activeThreadId])
+
+  function resetToSingleFreshThread() {
+    localStorage.removeItem(THREADS_STORAGE_KEY)
+    const id = Date.now()
+    setThreads([freshThread(id, 'Conversation 1')])
+    setActiveThreadId(id)
+  }
+
   function handleLogin(userData) {
+    // A fresh login (password submit or quick-login) always starts clean —
+    // this also covers the case where a JWT expired without an explicit
+    // logout and a different person then logs in on the same browser.
+    resetToSingleFreshThread()
     setUser(userData)
-    setResetKey(k => k + 1)
   }
 
   function handleLogout() {
     logout()
+    // Otherwise the next person to log in on this browser would resume this
+    // user's previous threads — the backend trusts session_id alone.
+    resetToSingleFreshThread()
     setUser(null)
-    setResetKey(k => k + 1)
     setRightPanel('audit')
     setPendingCount(0)
+  }
+
+  function handleNewThread() {
+    const id = Date.now()
+    setThreads(prev => [freshThread(id, `Conversation ${prev.length + 1}`), ...prev])
+    setActiveThreadId(id)
+  }
+
+  function handleSelectThread(id) {
+    setActiveThreadId(id)
+  }
+
+  function updateActiveThread(patch) {
+    setThreads(prev => prev.map(t => (t.id === activeThreadId ? { ...t, ...patch } : t)))
   }
 
   if (!user) {
     return <LoginPage onLogin={handleLogin} />
   }
+
+  const activeThread = threads.find(t => t.id === activeThreadId) || threads[0]
 
   const roleStyle = ROLE_STYLES[user.role] || ROLE_STYLES.employee
 
@@ -179,12 +238,30 @@ export default function App() {
 
       </header>
 
-      {/* ── Body: chat + inbox/audit log ───────────────────────────────── */}
+      {/* ── Body: sidebar + chat + inbox/audit log ─────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+        <Sidebar
+          threads={threads}
+          activeThreadId={activeThreadId}
+          onNewThread={handleNewThread}
+          onSelectThread={handleSelectThread}
+        />
 
         {/* Chat panel (~60%) */}
         <div style={{ flex: 3, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #1a1d2e' }}>
-          <ChatInterface key={resetKey} demoRole={user.role} displayName={user.display_name} onInboxToggle={HR_ROLES.has(user.role) ? () => setRightPanel(p => p === 'inbox' ? 'audit' : 'inbox') : undefined} />
+          {/* key={activeThread.id} forces a remount per thread — the fresh
+              instance reads that thread's own saved state via the `thread`
+              prop's lazy useState initializers, rather than reusing whatever
+              the previously-displayed thread had in local state. */}
+          <ChatInterface
+            key={activeThread.id}
+            thread={activeThread}
+            onThreadChange={updateActiveThread}
+            demoRole={user.role}
+            displayName={user.display_name}
+            onInboxToggle={HR_ROLES.has(user.role) ? () => setRightPanel(p => p === 'inbox' ? 'audit' : 'inbox') : undefined}
+          />
         </div>
 
         {/* Right panel — all three stay mounted; CSS controls visibility */}

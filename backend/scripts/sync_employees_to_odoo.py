@@ -26,11 +26,10 @@ def get_our_employees():
     conn = psycopg2.connect(config.DATABASE_URL)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Get tenant ID first, then set it as a string (no subquery in SET)
             cur.execute("SELECT id FROM tenants WHERE slug = 'fotopia'")
             tenant_id = str(cur.fetchone()['id'])
             cur.execute('SET ROLE fotopia_app')
-            cur.execute(f"SET app.current_tenant_id = '{tenant_id}'")
+            cur.execute("SET app.current_tenant_id = %s", (tenant_id,))
             cur.execute("""
                 SELECT e.employee_code, e.full_name, e.email, e.position,
                        e.department, e.start_date,

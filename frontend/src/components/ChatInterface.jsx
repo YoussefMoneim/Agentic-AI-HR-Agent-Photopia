@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchPendingCount, sendChat } from '../api.js'
+import { uploadOnboardingDocument } from '../onboarding/uploadApi.js'
+import AgentPicker from './AgentPicker/index.jsx'
 import MessageBubble from './MessageBubble.jsx'
+import OnboardingUploadButton from '../onboarding/OnboardingUploadButton.jsx'
 
+// HR-specific quick actions only — no generic content-gen buttons.
+// "Set up your agent" is HR/admin-only and rendered separately (see
+// SetupAgentButton below), matching the backend's own role gate.
 const QUICK_ACTIONS = {
   employee: [
-    'Check my leave balance',
-    'Request 3 days annual leave July 1-3',
-    'Show my leave requests',
-    "What is Saif Ahmed's employee profile?",
-    'Generate a salary certificate for Saif Ahmed',
+    'Ask a policy question',
+    'Submit leave',
   ],
   hr_manager: [
-    'Show pending approvals',
-    "What is Saif Ahmed's employee profile?",
-    'List all employees',
-    'Generate a salary certificate for Saif Ahmed',
+    'Ask a policy question',
+    'View pending approvals',
   ],
 }
 
@@ -23,22 +24,43 @@ const WELCOME = {
   hr_manager: (name) => `Hello ${name}! I can show pending approvals, look up employee data, and generate official HR documents. What would you like to do?`,
 }
 
-export default function ChatInterface({ demoRole, displayName: fullName, onInboxToggle }) {
+// `thread` ({ sessionId, messages, awaitingUpload }) and `onThreadChange`
+// make this a controlled-ish component: App.jsx owns the actual thread list
+// (and persists it), this component just mounts fresh per-thread (parent
+// renders it with key={thread.id}, so switching threads remounts it with
+// that thread's own saved state) and reports every change back upward so
+// switching away and back — or a page refresh — doesn't lose it.
+export default function ChatInterface({ thread, onThreadChange, demoRole, displayName: fullName, onInboxToggle }) {
   const displayName = (fullName || '').split(' ')[0] || 'there'
   const welcome = (WELCOME[demoRole] || WELCOME.hr_manager)(displayName)
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState(() => thread.messages ?? [
     { id: 0, role: 'agent', text: welcome, documents: [] },
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [sessionId, setSessionId] = useState(null)
+  const [sessionId, setSessionId] = useState(() => thread.sessionId ?? null)
+  const [awaitingUpload, setAwaitingUpload] = useState(() => thread.awaitingUpload ?? false)
   const [pendingCount, setPendingCount] = useState(0)
+  // Files the user has attached but not yet sent — staged here rather than
+  // uploaded on selection, so they can write their message, attach one or
+  // several files, remove any before sending, and send text + all files
+  // together in one action (each file still goes through its own upload
+  // call and its own content classification — there's just one composer
+  // action bundling them, not one combined backend request).
+  const [stagedFiles, setStagedFiles] = useState([])
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Push every change up to App.jsx's per-thread record — the only way this
+  // thread's own conversation survives switching to another thread and back.
+  useEffect(() => {
+    onThreadChange({ messages, sessionId, awaitingUpload })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, sessionId, awaitingUpload])
 
   useEffect(() => {
     if (!onInboxToggle) return  // only poll for HR roles that have the inbox
@@ -55,23 +77,46 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
 
   async function handleSend(text) {
     const msg = (text ?? input).trim()
-    if (!msg || loading) return
+    const files = stagedFiles
+    if ((!msg && !files.length) || loading) return
     setInput('')
+    setStagedFiles([])
 
-    setMessages(prev => [...prev, { id: Date.now(), role: 'user', text: msg, documents: [] }])
+    setMessages(prev => [
+      ...prev,
+      { id: crypto.randomUUID(), role: 'user', text: msg, documents: [], attachedFileNames: files.map(f => f.name) },
+    ])
     setLoading(true)
 
     try {
-      const data = await sendChat(msg, sessionId, demoRole)
-      if (data.session_id && !sessionId) setSessionId(data.session_id)
-      setMessages(prev => [
-        ...prev,
-        { id: Date.now() + 1, role: 'agent', text: data.response, documents: data.documents || [] },
-      ])
+      // Text and each file are separate backend calls either way (there's
+      // no combined endpoint) — sent in the order the user composed them:
+      // text first, then each attachment in turn, all against the same
+      // session. Each file gets its own reply, since each is independently
+      // classified and may fill a different slot (or be rejected).
+      if (msg) {
+        const data = await sendChat(msg, sessionId, demoRole)
+        if (data.session_id && !sessionId) {
+          setSessionId(data.session_id)
+        }
+        setAwaitingUpload(!!data.awaiting_upload)
+        setMessages(prev => [
+          ...prev,
+          { id: crypto.randomUUID(), role: 'agent', text: data.response, documents: data.documents || [] },
+        ])
+      }
+      for (const file of files) {
+        const data = await uploadOnboardingDocument(sessionId, file)
+        setAwaitingUpload(!!data.awaiting_upload)
+        setMessages(prev => [
+          ...prev,
+          { id: crypto.randomUUID(), role: 'agent', text: data.response, documents: data.documents || [] },
+        ])
+      }
     } catch (err) {
       setMessages(prev => [
         ...prev,
-        { id: Date.now() + 1, role: 'agent', text: `Something went wrong: ${err.message}`, documents: [] },
+        { id: crypto.randomUUID(), role: 'agent', text: `Something went wrong: ${err.message}`, documents: [] },
       ])
     } finally {
       setLoading(false)
@@ -86,7 +131,19 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
     }
   }
 
+  function handleFilesSelected(files) {
+    setStagedFiles(prev => [...prev, ...files])
+  }
+
+  function handleRemoveStagedFile(index) {
+    setStagedFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   const actions = QUICK_ACTIONS[demoRole] || QUICK_ACTIONS.hr_manager
+  // Must match agent/onboarding.py's own gate exactly — hr_staff is part of
+  // HR_ROLES (gets onInboxToggle) but NOT allowed to set up an agent, so
+  // this can't just reuse onInboxToggle's truthiness.
+  const canSetUpAgent = demoRole === 'hr_manager' || demoRole === 'admin'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -126,6 +183,43 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
       {/* ── Input + quick actions ──────────────────────────────────────── */}
       <div style={{ padding: '0 16px 16px', background: '#0f1117', borderTop: '1px solid #1a1d2e' }}>
 
+        {/* Agent picker */}
+        <div style={{ marginTop: '12px' }}>
+          <AgentPicker />
+        </div>
+
+        {/* Staged files — attached but not yet sent, each individually
+            removable before Send */}
+        {stagedFiles.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
+            {stagedFiles.map((file, index) => (
+              <div key={`${file.name}-${index}`} style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '6px 10px',
+                background: '#1a1d2e', border: '1px solid #252b42', borderRadius: '8px',
+                fontSize: '12px', color: '#a5b4fc',
+              }}>
+                <PaperclipIconSmall />
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {file.name}
+                </span>
+                <button
+                  onClick={() => handleRemoveStagedFile(index)}
+                  disabled={loading}
+                  title="Remove attachment"
+                  style={{
+                    background: 'none', border: 'none', color: '#6b7280',
+                    cursor: loading ? 'default' : 'pointer', fontSize: '15px',
+                    lineHeight: 1, padding: '2px 4px', fontFamily: 'inherit',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Text input */}
         <div style={{
           display: 'flex',
@@ -135,14 +229,14 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
           borderRadius: '14px',
           padding: '10px 14px',
           alignItems: 'flex-end',
-          marginTop: '12px',
+          marginTop: '10px',
         }}>
           <textarea
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKey}
-            placeholder={`Message as ${displayName}…`}
+            placeholder="What would you like to do?"
             rows={1}
             style={{
               flex: 1,
@@ -158,17 +252,27 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
               overflowY: 'auto',
             }}
           />
+          {/* Always rendered AND always clickable (except mid-request) —
+              never gated behind awaitingUpload. Selecting file(s) just
+              stages them (handleFilesSelected) — nothing uploads until
+              Send, same as typed text, so the user can compose a message,
+              attach one or more files, remove any if they change their
+              mind, and send everything together. */}
+          <OnboardingUploadButton
+            disabled={loading}
+            onFilesSelected={handleFilesSelected}
+          />
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || loading}
+            disabled={(!input.trim() && !stagedFiles.length) || loading}
             style={{
               width: 36, height: 36,
               borderRadius: '10px',
-              background: input.trim() && !loading ? '#2d3561' : '#1a1d2e',
+              background: (input.trim() || stagedFiles.length) && !loading ? '#2d3561' : '#1a1d2e',
               border: '1px solid',
-              borderColor: input.trim() && !loading ? '#4f5fa8' : '#252b42',
-              color: input.trim() && !loading ? '#a5b4fc' : '#444',
-              cursor: input.trim() && !loading ? 'pointer' : 'default',
+              borderColor: (input.trim() || stagedFiles.length) && !loading ? '#4f5fa8' : '#252b42',
+              color: (input.trim() || stagedFiles.length) && !loading ? '#a5b4fc' : '#444',
+              cursor: (input.trim() || stagedFiles.length) && !loading ? 'pointer' : 'default',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0,
               transition: 'all 0.15s',
@@ -218,6 +322,30 @@ export default function ChatInterface({ demoRole, displayName: fullName, onInbox
           </button>
         )}
 
+        {/* "Set up your agent" — HR/admin only, visually distinct from the
+            regular quick-action pills below (same handleSend call, just
+            more prominent, matching the backend's own role gate). */}
+        {canSetUpAgent && (
+          <button
+            onClick={() => handleSend('Set up your agent')}
+            disabled={loading}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '8px',
+              width: '100%', marginTop: '10px', padding: '10px 14px',
+              background: '#1e1a4e', border: '1px solid #4f46e5',
+              borderRadius: '10px', color: '#c7d2fe',
+              fontSize: '13px', fontWeight: 600,
+              cursor: loading ? 'default' : 'pointer',
+              fontFamily: 'inherit', transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#28226b' }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#1e1a4e' }}
+          >
+            <SetupIcon />
+            Set up your agent
+          </button>
+        )}
+
         {/* Quick-action pills */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
           {actions.map(action => (
@@ -261,6 +389,14 @@ function QuickAction({ label, disabled, onClick }) {
   )
 }
 
+function PaperclipIconSmall() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+      <path d="M21.44 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 015 5l-9.2 9.19a1.5 1.5 0 01-2.12-2.12l8.49-8.48" />
+    </svg>
+  )
+}
+
 function TypingDots() {
   return (
     <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
@@ -273,6 +409,14 @@ function TypingDots() {
         }} />
       ))}
     </span>
+  )
+}
+
+function SetupIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2l2.4 7.2H22l-6 4.4 2.3 7.2-6.3-4.5L5.7 21l2.3-7.2-6-4.4h7.6z" />
+    </svg>
   )
 }
 

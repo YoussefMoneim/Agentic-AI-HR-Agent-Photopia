@@ -1,12 +1,21 @@
-# Fotopia HR Agent — Project Architecture & Rules
+# Fotopia HR Agent — Engineering Standards & Project Architecture
 
-This file is read by Claude Code at the start of every session. It is the single source of truth for what this project is, what's built, what the rules are, and what comes next. Keep it updated as the project evolves — if a decision changes, update this file in the same session.
+> This file is read automatically by Claude Code at the start of every session. It is the single source of truth for what this project is, what's built, what the rules are, and what comes next — and it encodes the decisions, constraints, and patterns every contributor must follow. Treat it as law, not suggestion.
+> Keep it updated as the project evolves — if a decision changes, update this file in the same session. Update it via PR with reviewer approval only; do not edit unilaterally.
 
 ---
 
 ## 1. What this is
 
 An enterprise SaaS AI agent platform that automates HR tasks for Fotopia Technologies' clients (banks, government bodies, healthcare orgs) across Egypt/MENA. Claude (Anthropic) is the LLM. The first pilot client is Fotopia itself — Nourhan Hosny (HR Project Lead) is the first real user. The product vision is a "shared service operator" marketplace — a Copilot-style sidebar of department agents (HR first, then Finance/Admin/Legal), where a subscribed agent already has the access it needs and the user just types what they need done.
+
+This project is also the live pilot for **Zumra** — Fotopia's enterprise AI platform (see Section 17 for the full set of platform principles every feature should map onto).
+
+**Master success criterion (the north star for every decision):**
+> New client uploads documents on Monday. Employees are using a governed AI agent by Friday.
+> Zero developer involvement in encoding rules or updating knowledge.
+
+Every feature you build must move toward this criterion or it should not be built.
 
 ---
 
@@ -25,10 +34,10 @@ An enterprise SaaS AI agent platform that automates HR tasks for Fotopia Technol
 
 **Phase 2 — Partially done:**
 - ✓ Real JWT authentication (`backend/core/auth.py::decode_context`) replaces the `build_context()` stub. A `DEBUG_ALLOW_DEMO_ROLE` fallback still exists for local development but a startup assertion in `config.py` refuses it outside `APP_ENV in (local, dev)`.
-- ✓ **Full leave-management feature**, well beyond the original Phase 1 scope: submit → eligibility → approve/reject → cancel lifecycle, cancellation-of-already-approved-leave, a team leave calendar, the full WIN Holding Leave Policy engine (`HR/BTE 001/7-2025` — 17 leave types, notice periods, service minimums, career usage caps, carry-over expiry, casual sub-quota, 25% department concurrent cap), a deterministic constraint engine (hard/soft/advisory rules, `backend/workflow/constraints.py`), a document-sensitivity appropriateness layer (`backend/workflow/appropriateness.py`), a bidirectional email approval agent (SMTP send + IMAP reply parsing, correlation tokens, rate limiting), and one-way Odoo sync for approved/cancelled leave. Covered by ~283 passing tests.
+- ✓ **Full leave-management feature**, well beyond the original Phase 1 scope: submit → eligibility → approve/reject → cancel lifecycle, cancellation-of-already-approved-leave, a team leave calendar, the full WIN Holding Leave Policy engine (`HR/BTE 001/7-2025` — 17 leave types, notice periods, service minimums, career usage caps, carry-over expiry, casual sub-quota, 25% department concurrent cap), a deterministic constraint engine (hard/soft/advisory rules, `backend/workflow/constraints.py`), a document-sensitivity appropriateness layer (`backend/workflow/appropriateness.py`), a bidirectional email approval agent (SMTP send + IMAP reply parsing, correlation tokens, rate limiting), and one-way Odoo sync for approved/cancelled leave. Covered by 305 passing tests (verified 2026-07-09 — see Section 8, Step 4).
 - 🔲 Still open: Redis session history (still an in-memory `_sessions` dict), onboarding document-gen tools, ZDR agreement with Anthropic.
 
-**Phase 3+ — Not started.** RAG/knowledge layer, audit log hash-chaining/WORM, field-level encryption, onboarding state-machine writes. See Section 7.
+**Phase 3+ — Not started.** RAG/knowledge layer, audit log hash-chaining/WORM, field-level encryption, onboarding state-machine writes. See Section 11.
 
 ---
 
@@ -90,30 +99,35 @@ Layers 1-6 and 9 exist today (in some form). Layers 7-8 and the parallel/future 
    tenant_id on every table, every query. DataSource abstraction:
    PostgreSQLDataSource (backend/data/postgresql.py) is the real
    implementation, wired via backend/data/factory.py; odoo_sync.py
-   syncs approved/cancelled leave one-way to Odoo.
+   syncs approved/cancelled leave one-way to Odoo (non-blocking — see
+   ADR-003, Section 15).
    RLS ENABLE + FORCE on every tenant table (migration 001_add_rls.sql),
    with a CI guardrail test (test_security.py::TestRLSEnforced).
    FUTURE: per-tenant database option for premium clients,
    field-level encryption for national_id/salary (blind index pattern).
 
-7. KNOWLEDGE / RAG LAYER                                    [NOT BUILT — Phase 3]
-   pgvector, co-located with the relational DB (inherits RLS).
+7. KNOWLEDGE / RAG LAYER                            [BUILT — live in production]
+   Built and live as of July 2026: pgvector + Voyage AI embeddings
+   (voyage-multilingual-2, 1024 dims) + SharePoint delta sync, feeding
+   SearchPolicyTool with a full-text fallback for un-embedded chunks.
+   pgvector is co-located with the relational DB (inherits RLS) — see ADR-001.
    Every chunk carries: tenant_id + allowed_roles + owner_employee_id.
    Retrieval filters on this metadata BEFORE semantic search — never after
    (this is the lesson from the EchoLeak/Copilot failures — see Section 6).
    Labeling: tool-generated documents are auto-tagged by document TYPE
    (each type = allowed_roles + template, same idea as a "batch class" in
-   Fotopia's capture/DigitizeMe product — see Section 8 for that mapping).
+   Fotopia's capture/DigitizeMe product — see Section 14 for that mapping).
    Client-uploaded documents: human-classified, fail-CLOSED (most
    restrictive label) if unclassified.
    Tier 1 (public/legal reference data) — separate shared table, no
    tenant_id, no RLS, same for every tenant.
+   See Section 12 codebase map and ADR-001/002/004/006.
 
 8. LLM LAYER                                                [EXISTS — Claude/Grok swappable]
    claude.py is the ONLY file importing the Anthropic SDK. Stateless per
    request — context built ONLY from data already authorized at layers 5-7.
    FUTURE: signed Zero Data Retention (ZDR) agreement before any real client
-   data goes through Claude (see Section 9, open item #1 — may also require
+   data goes through Claude (see Section 16, open item #1 — may also require
    self-hosted Llama/Qwen depending on the legal answer; the abstraction
    already supports this via LLM_PROVIDER with zero tool/registry changes).
 
@@ -158,9 +172,11 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 | Security pattern | "Policy before prompt" — `ToolRegistry` filters tools by role BEFORE the LLM call, re-checks at execution, audits everything | Access control lives in tools/DB, never in the prompt |
 | Salary/math | Never done by the LLM — deterministic Python only | A wrong number on a legal document is a lawsuit |
 | Documents | Hardcoded fpdf templates, DB-driven slot-filling | LLM never invents content; consistent output every time |
-| RAG (future) | Metadata pre-filter (tenant_id + allowed_roles) BEFORE semantic search | The EchoLeak/Copilot lesson — filtering after search is too late |
+| RAG | Metadata pre-filter (tenant_id + allowed_roles) BEFORE semantic search — implemented in `PgvectorKnowledgeBase.search()`'s SQL WHERE clause | The EchoLeak/Copilot lesson — filtering after search is too late |
 | Prompt optimization | Offline only (DSPy/GEPA, frozen + human-reviewed artifact) — NEVER live self-modifying prompts | Live optimization is unauditable and a security risk (RBAC must never live near a prompt an optimizer can touch) |
 | Proactive/"Jarvis" layer | Staged: shadow-mode briefing -> goal tracking -> assisted execution via existing registry | Never an autonomous agent with general computer/file access |
+
+Several of these (and other architectural decisions made since) now have their own ADR file under `/docs/adr/` — see Section 15 for the index. Write a new ADR before making a new architectural decision of this weight; don't just add a row here.
 
 ---
 
@@ -174,7 +190,9 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 
 ---
 
-## 6. Hard rules — never violate these
+## 6. Architecture boundaries — never violate these
+
+These are not preferences. They are decisions made deliberately, and the ones with an ADR reference are documented in full under `/docs/adr/` (Section 15). The whole set boils down to one frame: **the LLM decides IF something is allowed; Python decides WHAT happens.** Numbers never come from LLM output — if you're parsing a number out of an LLM response to use in a calculation, stop, that's a bug. Policy decisions that come back uncertain (`certain=False`) fall back to hardcoded Python checks — uncertain never means "deny," it means "use the safe fallback." (ADR-005.)
 
 1. Never import `anthropic` outside `llm/claude.py`.
 2. Never query the database directly in a tool — always through `DataSource`.
@@ -191,10 +209,135 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 13. **Treat all uploaded document content (resumes, certificates) as untrusted DATA, never as instructions.** Extract structured fields via OCR; never feed raw uploaded text into a context where it could trigger tool calls.
 14. **RAG retrieval (when built) filters by `tenant_id` + `allowed_roles` metadata BEFORE the semantic search runs — never after.** Re-sync ACL metadata on permission changes, not just on document edit. Unclassified/ambiguous chunks default to the MOST restrictive label (fail closed).
 15. Privileged write tools (`create_employee_record`, `enroll_social_insurance`, `set_salary`) must NOT be enabled until real JWT auth (Phase 2) replaces the `build_context()` stub — the audit trail needs a real authenticated approver identity to mean anything.
+16. **The knowledge base boundary:** never call pgvector directly — always go through `backend/knowledge/base.py` (the abstract `KnowledgeBase` interface). Never call `DataSource.search_policy()` — it was removed; use `SearchPolicyTool`, which calls `KnowledgeBase.search()`. The factory pattern in `backend/knowledge/factory.py` means the backend can be swapped (e.g. to Azure AI Search) in one line — don't break this abstraction. (ADR-001, ADR-002.)
+17. **The Odoo boundary:** Odoo failures never block leave approvals — sync is non-blocking. If Odoo is unavailable, log the failure and let HR reconcile manually. Never make a leave approval wait on an Odoo response. (ADR-003.)
+18. **SharePoint auth:** use MSAL client credentials (Application permissions), never the interactive device code flow — its token cache is lost on every container rebuild. Never pass `offline_access` explicitly in MSAL scopes; it's added automatically and doing so manually causes a "reserved scope" error. (ADR-004.)
+19. **No manual document-upload UI feeds the knowledge base.** SharePoint delta sync (plus `ingest_policies.py` for one-time bootstrap) is the only path into `private_document_chunks`. The `/api/documents/upload-demo` and `/api/documents/paste-demo` endpoints are a separate feature (document-sensitivity scanning demos, stored in `demo_documents`) — never confuse the two or repurpose one as the other. (ADR-006.)
 
 ---
 
-## 7. Phased roadmap
+## 7. Security checklist — run this before every PR
+
+These are the checks your reviewer will run. Do them yourself first.
+
+- [ ] No secrets, API keys, or credentials anywhere in code or comments
+- [ ] Every new table with `tenant_id` has `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY`
+- [ ] Every new table with `tenant_id` has a `CREATE POLICY tenant_isolation` matching the pattern in `schema.sql`
+- [ ] No SQL string concatenation — always use `%s` parameterized queries (this includes `SET app.current_tenant_id = %s`, not an f-string — a real instance of this was found and fixed in `scripts/sync_employees_to_odoo.py` on 2026-07-09)
+- [ ] No hardcoded tenant slugs in new code (use `config.TENANT_SLUG` or resolve from JWT) — several existing ops scripts under `backend/scripts/` still hardcode `'fotopia'` and are grandfathered in as known, low-risk exceptions (they're not in the live request path); don't add new ones
+- [ ] No numbers parsed from LLM responses used in calculations
+- [ ] Sensitive fields (salary, national ID) not logged in plaintext
+- [ ] New API endpoints have JWT auth and role check before any data access
+- [ ] New tools registered in the tool registry with correct role permissions
+
+---
+
+## 8. How to add a new feature — the mandatory sequence
+
+**Never skip steps. Never reorder them.**
+
+### Step 1: Reconnaissance first
+Before writing any implementation code, run a read-only Claude Code prompt:
+```
+Read [relevant files]. Show me exactly how [the thing I'm about to change] currently works.
+Report verbatim. No changes.
+```
+This has caught real bugs (wrong column names, wrong auth patterns, wrong file structure) multiple times on this project. Skipping it causes wasted work.
+
+### Step 2: Check the column names
+The schema has traps. Check before you assume:
+- `leave_types` columns: `name_en`, `service_min_days` (days, not years), `max_times_in_career`, `max_days_per_year`, `max_consecutive_days`
+- Notice periods live in `leave_policies` table (`min_notice_days`), not `leave_types`
+- `private_document_chunks`: the source column is `source_file`, not `source_url` or `source_doc`
+- `document_id` in `private_document_chunks` = `document_name` from `kb.ingest()` = filename stem
+
+### Step 3: Write the implementation
+- One branch per feature: `git checkout main && git pull && git checkout -b feature/name`
+- Never commit directly to main
+- Keep changes focused — one feature per branch
+
+### Step 4: Tests before PR
+- 305 tests must pass (currently). Run `pytest` in the backend container.
+- New features need new tests. No untested code merges.
+- Use `future_working_date(n)` from `backend/tests/conftest.py` for any test needing a future date — never use `date.today() + timedelta(days=N)` directly (this has caused clock-drift failures multiple times)
+- Tests must not make live API calls. Mock Voyage AI, Claude, Odoo in tests.
+
+### Step 5: Commit immediately after working
+Work was lost once because it wasn't committed before a container rebuild.
+**Commit as soon as something works. Do not accumulate uncommitted work.**
+```
+git add [files]
+git commit -m "feat: [what it does, not what the code is]"
+git push origin feature/name
+```
+
+### Step 6: PR before merge
+- Open a PR on Azure DevOps
+- Assign the other intern (Saif or Youssef) as reviewer
+- PR description must include: what changed, why, which tests cover it, any migrations added
+- Reviewer must confirm tests pass before approving
+
+---
+
+## 9. Writing prompts for Claude Code — the right way
+
+This is an AI-assisted codebase. How you prompt Claude Code determines whether the output fits the codebase or diverges from it.
+
+### Always do reconnaissance before implementation
+```
+WRONG: "Add a method to delete a document from the knowledge base"
+
+RIGHT: "Read backend/knowledge/pgvector_kb.py and backend/knowledge/base.py.
+Show me the full ingest() method and the abstract KnowledgeBase interface verbatim.
+No changes. I need to understand the pattern before adding delete_document()."
+```
+
+### Scope prompts tightly
+```
+WRONG: "Build the multi-tenant onboarding flow"
+
+RIGHT: "I need to add a --tenant flag to backend/scripts/ingest_policies.py.
+Currently get_fotopia_tenant_id() hardcodes slug='fotopia'.
+Read that function verbatim, then modify it to accept an optional --tenant argument
+that defaults to 'fotopia' if not provided. Do not change anything else in the file."
+```
+
+### Always specify what NOT to change
+```
+"Add the delete_document() method to pgvector_kb.py following the exact same
+pattern as ingest() — same _set_tenant() call, same connection handling.
+Do not modify any existing methods. Do not add any new imports."
+```
+
+### After Claude Code runs, paste the full output back for review
+Do not assume the output is correct. Paste verbatim output (including any self-corrections) for a second review before running anything in production.
+
+### Never prompt Claude Code to:
+- Bypass security checks "just for testing"
+- Hardcode values that should come from config or the database
+- Use a different embedding model than `voyage-multilingual-2`
+- Change the chunk vector dimensions (currently 1024 — any change requires a migration)
+- Add a direct `anthropic` import outside `backend/llm/claude.py`
+
+---
+
+## 10. What to do when you're unsure
+
+**If you're unsure whether something is the right approach:**
+1. Don't build it yet
+2. Ask: does this move toward the master success criterion (Section 1)?
+3. Ask: does this weaken any of the boundaries in Section 6?
+4. Ask: is there a simpler version that delivers the same value?
+5. If still unsure, flag it in the daily standup before building
+
+**If Claude Code produces something that looks wrong:**
+- Paste it back for review before running it
+- Check column names against schema.sql before any new query
+- Check the three-layer auth is present before any new endpoint goes live
+
+---
+
+## 11. Phased roadmap
 
 | Phase | What ships |
 |---|---|
@@ -203,13 +346,14 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 | **1.5** ✓ | CI guardrail: `test_security.py::TestRLSEnforced` asserts RLS is enabled+forced on every `tenant_id` table, plus a cross-tenant query test expecting zero rows. `MockDataSource` renamed to `PostgreSQLDataSource`. |
 | **2** ✓ | JWT auth (`core/auth.py::decode_context`, replaces `build_context()` stub) — prerequisite for all privileged writes. `DEBUG_ALLOW_DEMO_ROLE` remains as a dev-only fallback, locked to `APP_ENV in (local, dev)` |
 | **2** ✓ | RLS enabled with FORCE on all tenant tables |
-| **2** ✓ | Full leave-management lifecycle: submit/eligibility/approve/reject/cancel, cancellation-of-approved-leave, team calendar, WIN Holding Leave Policy engine (17 types), constraint engine (hard/soft/advisory), appropriateness layer, bidirectional email approval agent, Odoo sync. ~283 passing tests |
+| **2** ✓ | Full leave-management lifecycle: submit/eligibility/approve/reject/cancel, cancellation-of-approved-leave, team calendar, WIN Holding Leave Policy engine (17 types), constraint engine (hard/soft/advisory), appropriateness layer, bidirectional email approval agent, Odoo sync. 305 passing tests |
 | **2** 🔲 next | Redis for session history (replaces in-memory _sessions dict) |
 | **2** 🔲 | Onboarding Phase 1: document-gen tools only (offer letter, bilingual employment contract, NDA, checklist) — no writes yet |
 | **2** 🔲 | Role/field RESTRICTIVE policies (Tier 3) — RLS today is tenant-scoped only, not yet role/field-scoped at the DB layer |
 | **2** 🔲 | ZDR agreement with Anthropic — pursue in parallel with open item #1 below |
+| **2** 🔲 | Knowledge layer follow-ups: document ingest API endpoint, Tier 1 `public_knowledge_chunks` ingestion path, `VOYAGE_API_KEY` documented as a hard registry-build dependency |
 | **3** 🔲 | Onboarding Phase 2: `onboarding_cases` state machine + gated writes (Rule 12) — can reuse the existing `pending_actions` table already proven by the leave-approval flow |
-| **3** 🔲 | RAG/knowledge layer — pgvector, metadata pre-filter, Tier 1/2/3 separation (Rule 14) |
+| **3** 🔲 | RAG/knowledge layer — pgvector, metadata pre-filter, Tier 1/2/3 separation (Rule 14) — first slice already exists, see Section 3 Layer 7 |
 | **3** 🔲 | Audit log hash-chaining + WORM mirror (Rule 8) |
 | **3** 🔲 | Field-level encryption for national_id, salary (blind index pattern, Section 5) |
 | **4** 🔲 | Database-per-tenant option for premium banking/gov clients |
@@ -218,7 +362,96 @@ FUTURE — PROACTIVE "JARVIS" LAYER                           [NOT BUILT — Pha
 
 ---
 
-## 8. DigitizeMe integration note (future)
+## 12. Known traps — real bugs that happened on this project
+
+Do not repeat these. They are documented so they never happen again.
+
+| Trap | What happened | The rule |
+|---|---|---|
+| Wrong embedding model name | Used `voyage-3-multilingual` (doesn't exist) — caught early | Always use `voyage-multilingual-2` |
+| Wrong vector dimensions | Old migration used 1536 dims, Voyage AI uses 1024 | Migration 019 fixed this. Never change dimension without a migration |
+| Clock drift in tests | `date.today() + timedelta(days=N)` silently landed on weekends | Use `future_working_date(n)` from conftest.py |
+| Uncommitted work wiped | PolicyEngine rebuilt from scratch after container rebuild | Commit immediately after anything works |
+| Hardcoded policy in system prompt | Agent answered "24 hours" from memory after document said "48 hours" | No policy numbers in system_prompt.txt — ever |
+| Stale document in KB | `leaves_policy_egypt_v2` (old) contradicted `03_leave_policy_v2_WIN` (current) | When a document supersedes another, delete the old one via `delete_document.py` |
+| Azure SharePoint auth | Device code flow fails after container rebuild (token cache lost) | Use client credentials (MSAL Application permissions), not device code flow |
+| SharePoint folder path | `/Shared Documents` gives 404 — it's the drive root not a subfolder | Create an actual subfolder (e.g. `/HR Policies`) and point there |
+| MSAL scope bug | Passing `offline_access` explicitly in scopes causes "reserved scope" error | MSAL adds it automatically — never pass it explicitly |
+| Secret in chat | Azure client secret was pasted in chat once | Never paste secrets anywhere. Rotate immediately if it happens |
+| SQL string interpolation in an ops script | `scripts/sync_employees_to_odoo.py` built `SET app.current_tenant_id = '{tenant_id}'` as an f-string instead of parameterizing it | Always `cur.execute("SET app.current_tenant_id = %s", (tenant_id,))` — fixed 2026-07-09 |
+
+---
+
+## 13. Codebase map — where things live
+
+```
+backend/
+  agent/
+    system_prompt.txt     — NO hardcoded policy numbers here. Ever.
+  api/
+    main.py               — FastAPI routes, JWT auth, _build_context()
+  connectors/
+    sharepoint.py          — SharePoint delta sync connector
+  core/
+    auth.py               — JWT issuance and decode_context() — single source of truth
+  data/
+    postgresql.py          — _set_tenant() lives here — called before every query
+  db/
+    schema.sql             — Ground truth for table structure
+    migrations/            — Numbered migrations — always add RLS before merging.
+                              See "Migration numbering convention" below.
+  knowledge/
+    base.py                — Abstract KnowledgeBase — always code to this interface
+    pgvector_kb.py          — Concrete implementation — ingest(), search(), delete_document()
+    chunker.py              — Section-based chunking (primary) + fixed-size fallback
+    factory.py              — get_knowledge_base() — swap backend here, nowhere else
+  llm/
+    claude.py               — ONLY file allowed to import anthropic
+    factory.py              — get_llm() — always use this
+  scripts/
+    delete_document.py      — Remove stale documents from knowledge base
+    demo_reset.py            — Reset to clean demo state before Raef meetings
+    ingest_policies.py       — Ingest documents — currently hardcoded to fotopia tenant
+  tests/
+    conftest.py              — future_working_date() helper — use this for date tests
+  tools/
+    base.py                  — ToolContext definition, base Tool class
+    leave.py                 — CheckLeaveEligibilityTool, SubmitLeaveRequestTool, etc.
+    policy.py                — SearchPolicyTool — uses KnowledgeBase.search()
+  workflow/
+    policy_engine.py         — PolicyEngine — reads eligibility from KB at runtime
+```
+
+### Migration numbering convention (agreed July 14, 2026 — multiple people building in parallel)
+
+Migrations are applied by `backend/scripts/reset_demo_environment.sh`, which globs
+`backend/db/migrations/*.sql` and runs every file in plain filename-sorted order —
+there is no persisted "already applied" tracking table. This means:
+
+- Ordering is determined **entirely by filename**, every time the script runs, regardless of
+  git merge order or when a file was actually written. Every migration file MUST stay
+  idempotent (`CREATE TABLE IF NOT EXISTS`, `DROP POLICY IF EXISTS` + recreate, etc.) so
+  re-running the whole directory is always safe.
+- **While multiple people have migrations in flight on separate branches at the same time**,
+  avoid two people picking the same number by splitting into ranges instead of
+  coordinating on every single file:
+  - Saif (and the normal/default sequence): continues the plain numbering — `021`, `022`, `023`...
+  - Youssef: uses `101`, `102`, `103`... while his branch and Saif's are both active, so neither
+    has to wait on the other to create a migration.
+  - Because `101+` always sorts after `021-099`, this also fixes dependency direction: a
+    migration in the `101+` range CAN safely depend on a table created in the `021-099` range
+    (it always applies later), but not the other way around — keep that in mind if a future
+    migration needs to reference something from the other range.
+- **Once both branches are merged**, whoever does it should renumber everything into one clean
+  sequential range — compress the gaps, but preserve the existing relative order between files
+  (don't reshuffle which migration ran before which; some later file may depend on an earlier
+  one's table/column already existing).
+- This convention is temporary, scoped to the current sprint's parallel work — once the branches
+  converge, go back to plain sequential numbering with the coordinate-before-creating rule.
+
+---
+
+## 14. DigitizeMe integration note (future)
 
 Fotopia's capture service uses a `tenant -> department -> batch class` hierarchy. "Batch class" = a per-document-type processing template (extraction rules, routing — NOT an access-control concept). If DigitizeMe becomes the document storage backend:
 
@@ -228,7 +461,37 @@ Fotopia's capture service uses a `tenant -> department -> batch class` hierarchy
 
 ---
 
-## 9. Open items — business/legal, not engineering (raise with Dr. Ahmed/Raef)
+## 15. Architecture Decision Records
+
+Every significant architectural decision is documented in `/docs/adr/`. Before making a decision that affects the architecture, check if an ADR covers it. Before making a new architectural decision, write an ADR first.
+
+ADR format (keep it short):
+```
+# ADR-XXX: [Decision title]
+Date: YYYY-MM-DD
+Status: Accepted
+
+## Decision
+[One paragraph: what was decided]
+
+## Why
+[One paragraph: why this and not the alternatives]
+
+## Consequences
+[What this means going forward — what's easier, what's harder]
+```
+
+Existing ADRs (all six now written under `/docs/adr/`):
+- ADR-001: pgvector over dedicated vector DB
+- ADR-002: One SearchPolicyTool with hybrid fallback (not two tools)
+- ADR-003: Non-blocking Odoo sync
+- ADR-004: Client credentials auth for SharePoint
+- ADR-005: LLM decides IF / Python decides WHAT (the core safety boundary)
+- ADR-006: No manual document upload UI — SharePoint is the system of record
+
+---
+
+## 16. Open items — business/legal, not engineering (raise with Dr. Ahmed/Raef)
 
 1. **(Urgent, parallel-track)** Egypt PDPL cross-border transfer — does sending tenant data to Claude's cloud API require a PDPC license? Affects whether real client data can go through cloud Claude. Engineering continues on mock data regardless (no real exposure with synthetic Saif/Omar/Nourhan records) — but this blocks real-client go-live.
 2. **DPO appointment** — PDPL requires a registered Data Protection Officer before processing sensitive data (salary + national ID are both "sensitive" under Egyptian law) at scale.
@@ -238,7 +501,21 @@ Fotopia's capture service uses a `tenant -> department -> batch class` hierarchy
 
 ---
 
-## 10. Running the project
+## 17. The Zumra north star
+
+This project is the foundation of Zumra — Fotopia's enterprise AI platform. Every feature you build should be compatible with the Zumra architecture:
+
+- **Permission-first retrieval**: answers and actions only use data the requesting user can access
+- **Governed agent lifecycle**: agents are managed assets, not ad hoc prompts
+- **Explainability**: every grounded answer should be traceable to a source document
+- **Separation of tiers**: Read → Draft → Approve-to-act → Auto-act. More sensitive actions need more approval.
+- **Connector abstraction**: source systems connect through a common interface, not one-off integrations
+
+If a feature you're building works against any of these principles, flag it before building.
+
+---
+
+## 18. Running the project
 
 ```bash
 cp .env.example .env          # add your ANTHROPIC_API_KEY / GROK_API_KEY — never commit this file
@@ -258,11 +535,17 @@ watch -n 2 'docker exec fotopia-hr-agent-db-1 psql -U fotopia -d fotopia_hr \
 
 ---
 
-## 11. Who is involved
+## 19. Who is involved
 
 - **Youssef (Joe) Abdelmoneim** — building this (Computer Engineering, AUS, AI/ML intern)
+- **Saif** — the other intern on this project; assign as PR reviewer alongside Youssef (Section 8, Step 6)
 - **Dr. Ahmed El-Yazbi** — R&D AI Director, main technical stakeholder
-- **Raef Eid** — Founder/chief software architect, product vision owner
+- **Raef Eid** — Founder/CEO, chief software architect, product vision owner
 - **Nourhan Hosny** — HR Project Lead, first real user
 - **Fotopia Technologies** — Cairo, document management company under WIN Holding Group
-- **DigitizeMe** — Fotopia's document management product, potential storage backend (Section 8)
+- **DigitizeMe** — Fotopia's document management product, potential storage backend (Section 14)
+
+---
+
+*Last updated: July 9, 2026 — Youssef Abdelmoneim*
+*Update this file via PR with reviewer approval. Do not edit unilaterally.*
