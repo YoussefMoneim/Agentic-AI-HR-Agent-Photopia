@@ -95,6 +95,13 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         RequestLeaveCancellationTool,
         SubmitLeaveRequestTool,
     )
+    from tools.employee_write import CreateEmployeeRecordTool
+    from tools.onboarding import (
+        CreateOnboardingTool,
+        CustomizeOnboardingTemplateTool,
+        GetOnboardingStatusTool,
+        UpdateOnboardingStepTool,
+    )
     from tools.policy import SearchPolicyTool
     from tools.odoo_connect import ConnectOdooTool
     from tools.knowledge_ingest import IngestPolicyDocumentTool
@@ -140,5 +147,13 @@ def build_registry(data_source: "DataSource", audit_logger: AuditLogger) -> "Too
         # Onboarding (2)
         ConnectOdooTool(),
         IngestPolicyDocumentTool(knowledge_base),
+        # Employee write tools (HITL-gated)
+        CreateEmployeeRecordTool(data_source),
+        # Legacy tool-based onboarding (pre-azure-migration) — coexists with
+        # the agent/onboarding.py orchestrator; not yet consolidated
+        CreateOnboardingTool(data_source),
+        GetOnboardingStatusTool(data_source),
+        UpdateOnboardingStepTool(data_source),
+        CustomizeOnboardingTemplateTool(data_source),
     ]
     return ToolRegistry(tools, audit_logger)

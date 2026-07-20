@@ -144,6 +144,29 @@ def can_access(caller: "ToolContext", action: str, target: dict) -> AccessDecisi
             )
         return AccessDecision(allowed=True)
 
+    # ── read_onboarding ───────────────────────────────────────────────────────
+    # Employees may only read their own onboarding case.
+    if action == "read_onboarding":
+        target_code = target.get("employee_code", "")
+        if role == "employee" and target_code != caller.employee_code:
+            return AccessDecision(
+                allowed=False,
+                reason="You can only view your own onboarding checklist.",
+            )
+        return AccessDecision(allowed=True)
+
+    # ── update_onboarding_step ────────────────────────────────────────────────
+    # Employees may only update steps on their own case; owner-field check is
+    # handled inside the tool itself (only owner='employee' steps are self-service).
+    if action == "update_onboarding_step":
+        target_code = target.get("employee_code", "")
+        if role == "employee" and target_code != caller.employee_code:
+            return AccessDecision(
+                allowed=False,
+                reason="You can only update steps in your own onboarding checklist.",
+            )
+        return AccessDecision(allowed=True)
+
     # Fail-closed: unknown action
     return AccessDecision(
         allowed=False,
